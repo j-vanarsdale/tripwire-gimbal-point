@@ -5,7 +5,7 @@ import json
 # --------------------
 # DEFAULT CONSTANTS
 # --------------------
-DEFAULT_PORT = "/dev/ttyAMA0"
+DEFAULT_PORT = "/dev/ttyAMA0" # ttyAMA10
 DEFAULT_BAUD = 115200
 
 DEFAULT_FALLBACK = (-33.76535, 150.74087, 0.0)  # lat, lon, alt
