@@ -2,6 +2,7 @@
 import time, math, signal, sys, argparse
 from pymavlink import mavutil
 import json
+from datetime import datetime
 # --------------------
 # DEFAULT CONSTANTS
 # --------------------
@@ -14,6 +15,9 @@ DEFAULT_PITCH_OFFSET = 0.0
 
 DEFAULT_RATE = 10
 DEFAULT_SMOOTH = 0.1   # smoothing factor (0–1), smoothed = smoothed + alpha * (new-smoothed)
+
+DEFAULT_MODE = 1
+DEFAULT_DISTANCE = 0.1
 # --------------------
 
 def compute_angles(lat0, lon0, alt0, lat1, lon1, alt1):
@@ -24,6 +28,25 @@ def compute_angles(lat0, lon0, alt0, lat1, lon1, alt1):
     bearing = math.degrees(math.atan2(de, dn))
     elev = math.degrees(math.atan2(du, math.hypot(dn, de)))
     return elev, bearing
+
+# Grabbed from google, hope this works
+def quaternion_to_euler(w, x, y, z):
+    # Roll (x-axis rotation)
+    t0 = +2.0 * (w * x + y * z)
+    t1 = +1.0 - 2.0 * (x * x + y * y)
+    roll = math.degrees(math.atan2(t0, t1))
+
+    # Pitch (y-axis rotation)
+    t2 = +2.0 * (w * y - z * x)
+    t2 = +1.0 if t2 > +1.0 else t2
+    t2 = -1.0 if t2 < -1.0 else t2
+    pitch = math.degrees(math.asin(t2))
+
+    # Yaw (z-axis rotation)
+    t3 = +2.0 * (w * z + x * y)
+    t4 = +1.0 - 2.0 * (y * y + z * z)
+    yaw = math.degrees(math.atan2(t3, t4))
+    return roll, pitch, yaw
 
 def connect_with_retry(port, baud):
     while True:
@@ -50,11 +73,15 @@ def main():
     parser.add_argument("--rate", type=int, default=DEFAULT_RATE)
     parser.add_argument("--smooth", type=float, default=DEFAULT_SMOOTH,
                         help="Smoothing factor: 1=fast, 0.5=smooth, 0=hold value")
+    parser.add_argument("--mode", type=int, default=DEFAULT_MODE,
+                        help="Run mode: 1=look west, 2=user input")
+    parser.add_argument("--distance", type=int, default=DEFAULT_DISTANCE,
+                        help="Target distance away (lat/lon degrees)")
     args = parser.parse_args()
-
+    
     dt = 1.0 / args.rate
     alpha = args.smooth
-
+    dist = args.distance
     # Load fallback override
     if args.fallback:
         fb = args.fallback.split(",")
@@ -84,43 +111,11 @@ def main():
     last_raw = None
     smooth_pos = None
     live = None     # Live position(1) or fallback(0)
+    filename = datetime.now().strftime("%Y%m%d_%H%M") + ".jsonl"
+    direction = None # For direction input
 
-    print("Running...\n")
-    while True:
-
-        # If cube disconnects mid‑run — reconnect
-        try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
-        except Exception:
-            print("Lost connection. Reconnecting...")
-            master = connect_with_retry(args.port, args.baud)
-            continue
-        
-        # Quick restart if mavlink didnt send anything yet
-        if msg is None:
-            continue
-        
-        live = 0    # Assume fallback default
-
-        # Check for GPS and update position
-        if msg.lat != 0:
-            last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
-            fallback = last_raw
-            live = 1
-        else:
-            last_raw = fallback
-        
-        #if msg:
-        #    last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
-        #elif last_raw and last_raw[0] == 0:
-        #    last_raw = fallback
-            
-        #fallback = last_raw # Update fallback to last known position
-        
-        heading = msg.hdg / 100.0   # Heading SHOULD always return result
-
-        # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
-        message = master.mav.command_long_encode(
+    print("Initializing gimbal pose telemetry...\n")
+    message = master.mav.command_long_encode(
                 master.target_system,  # Target system ID
                 master.target_component,  # Target component ID
                 mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,  # ID of command to send
@@ -134,23 +129,48 @@ def main():
                 0        # param6 (unused)
                 )
 
-        # Send the COMMAND_LONG
-        master.mav.send(message)
+    # Send the COMMAND_LONG
+    master.mav.send(message)
 
-        # Wait for a response (blocking) to the MAV_CMD_SET_MESSAGE_INTERVAL command and print result
-        response = master.recv_match(type='COMMAND_ACK', blocking=True)
-        if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-            print("Command accepted")
+    # Wait for a response (blocking) to the MAV_CMD_SET_MESSAGE_INTERVAL command and print result
+    response = master.recv_match(type='COMMAND_ACK', blocking=True)
+    if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+        print("Command accepted")
+    else:
+        print("Command failed")
+
+    print("Running...\n")
+    while True:
+
+        # If cube disconnects mid‑run — reconnect
+        try:
+            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+        except Exception:
+            print("Lost connection. Reconnecting...")
+            master = connect_with_retry(args.port, args.baud)
+            continue
+        
+        live = 0    # Assume fallback default
+
+        # Check for GPS and update position
+        if msg.lat != 0:
+            last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
+            fallback = last_raw
+            live = 1
         else:
-            print("Command failed")
+            last_raw = (fallback[0], fallback[1], msg.alt/1000) # CHANGE BACK TO JUST fallback. Without GPS, altitude is still provided.
 
+        heading = msg.hdg / 100.0   # Heading SHOULD always return result
+
+        # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
         try:
             msg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
             continue
-        print(msg)
+        
+        gim_roll, gim_pitch, gim_yaw = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
         # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
 
         # Smoothing filter
@@ -164,25 +184,26 @@ def main():
 
         lat, lon, alt = smooth_pos
 
-        #-33.76522600900671, 150.7418995647777
-        #-33.765408585430926, 150.74102906288317
         # Set target initially to self
         tgt_lat = float(lat)
         tgt_lon = float(lon)
         tgt_alt = float(alt) # Later to be called by actual target alt
 
-        # Direction used later for target pointing
-        direction = input("Set Look to (N/S/E/W) | Presets (A/T/1/2):  ")
-
-        # Adjust lat/lon to look ~10 km in that direction
+        if args.mode == 2:
+            # Direction used later for target pointing
+            direction = input("Set Look to (N/S/E/W) | Presets (A/T/1/2):  ")
+        elif args.mode == 1:
+            tgt_lon = float(lon - dist)
+        
+        # Adjust lat/lon to look ~10 km in that direction (for dist default = 0.1)
         if direction == "N":
-            tgt_lat = float(lat + 0.1)
+            tgt_lat = float(lat + dist)
         elif direction == "S":
-            tgt_lat = float(lat - 0.1)
+            tgt_lat = float(lat - dist)
         elif direction == "E":
-            tgt_lon = float(lon + 0.1)
+            tgt_lon = float(lon + dist)
         elif direction == "W":
-            tgt_lon = float(lon - 0.1)
+            tgt_lon = float(lon - dist)
         elif direction == "T":
             tgt_lon = float(input("Target lon:"))
             tgt_lat = float(input("Target lat:"))
@@ -192,7 +213,6 @@ def main():
         elif direction == "2":
             tgt_lat = float(-33.765408585430926)
             tgt_lon = float(150.74102906288317)
-            
         pitch, yaw = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
 
         if direction == "A":
@@ -200,8 +220,7 @@ def main():
             pitch = float(input("Pitch angle:"))
         yaw_corrected = ((yaw - heading + 180) % 360 - 180) # Wrap 180
 
-        #print(f"heading: {heading} | lat: {lat:.3f} | lon: {lon:.3f} | Raw yaw: {yaw} | yaw: {yaw_corrected}")
-
+        # To add: battery information, computed roll
         payload = {
             "t": time.time(),
             "type": "Position",
@@ -214,12 +233,19 @@ def main():
             "target lon": tgt_lon,
             "target alt": tgt_alt,
             "computed yaw": yaw,
-            "corrected yaw": yaw_corrected
+            "corrected yaw": yaw_corrected,
+            "computed pitch": pitch,
+            "gimbal roll": gim_roll,
+            "gimbal pitch": gim_pitch,
+            "gimbal yaw": gim_yaw,
         }
+
+        # Debug / Logging
         print(payload)
-        with open("data.json", "w") as f:
-            json.dump(data, f, indent=4)
+        with open(filename, "a") as f:
+            f.write(json.dumps(payload) + "\n")
         
+        # Gimbal Control
         try:
             master.mav.command_long_send(
                 master.target_system, master.target_component,
