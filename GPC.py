@@ -90,7 +90,7 @@ def main():
 
         # If cube disconnects mid‑run — reconnect
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
+            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -118,6 +118,40 @@ def main():
         #fallback = last_raw # Update fallback to last known position
         
         heading = msg.hdg / 100.0   # Heading SHOULD always return result
+
+        # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
+        message = master.mav.command_long_encode(
+                master.target_system,  # Target system ID
+                master.target_component,  # Target component ID
+                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,  # ID of command to send
+                0,  # Confirmation
+                mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,  # param1: Message ID to be streamed or 285
+                100000, # param2: Interval in microseconds
+                0,       # param3 (unused)
+                0,       # param4 (unused)
+                0,       # param5 (unused)
+                0,       # param5 (unused)
+                0        # param6 (unused)
+                )
+
+        # Send the COMMAND_LONG
+        master.mav.send(message)
+
+        # Wait for a response (blocking) to the MAV_CMD_SET_MESSAGE_INTERVAL command and print result
+        response = master.recv_match(type='COMMAND_ACK', blocking=True)
+        if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
+            print("Command accepted")
+        else:
+            print("Command failed")
+
+        try:
+            msg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
+        except Exception:
+            print("Lost connection. Reconnecting...")
+            master = connect_with_retry(args.port, args.baud)
+            continue
+        print(msg)
+        # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
 
         # Smoothing filter
         if smooth_pos is None:
@@ -175,9 +209,17 @@ def main():
             "lon": lon,
             "alt": alt,
             "heading": heading,
-            "live": live
+            "live": live,
+            "target lat": tgt_lat,
+            "target lon": tgt_lon,
+            "target alt": tgt_alt,
+            "computed yaw": yaw,
+            "corrected yaw": yaw_corrected
         }
         print(payload)
+        with open("data.json", "w") as f:
+            json.dump(data, f, indent=4)
+        
         try:
             master.mav.command_long_send(
                 master.target_system, master.target_component,
