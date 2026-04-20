@@ -13,7 +13,7 @@ DEFAULT_YAW_OFFSET = 0.0
 DEFAULT_PITCH_OFFSET = 0.0
 
 DEFAULT_RATE = 10
-DEFAULT_SMOOTH = 0.1   # smoothing factor (0–1), smoothed = smoothed + alpha * (new-smoothed)
+DEFAULT_SMOOTH = 0   # smoothing factor (0–1), smoothed = smoothed + alpha * (new-smoothed)
 # --------------------
 
 def compute_angles(lat0, lon0, alt0, lat1, lon1, alt1):
@@ -111,12 +111,6 @@ def main():
         else:
             last_raw = fallback
         
-        #if msg:
-        #    last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
-        #elif last_raw and last_raw[0] == 0:
-        #    last_raw = fallback
-            
-        #fallback = last_raw # Update fallback to last known position
         
         heading = msg.hdg / 100.0   # Heading SHOULD always return result
 
@@ -134,23 +128,30 @@ def main():
         #-33.76522600900671, 150.7418995647777
         #-33.765408585430926, 150.74102906288317
         # Set target initially to self
-        tgt_lat = float(lat)
-        tgt_lon = float(lon)
-        tgt_alt = float(alt) # Later to be called by actual target alt
+        if counter == 0:
+            tgt_lat = float(lat)
+            tgt_lon = float(lon)
+            tgt_alt = float(alt) # Later to be called by actual target alt
 
         counter += 1
-        if counter == 10:
-            tgt_lat = float(-33.76522600900671)
-            tgt_lon = float(150.7418995647777)
-        elif counter == 40:
-            tgt_lat = float(-33.765408585430926)
-            tgt_lon = float(150.74102906288317)
-        elif counter == 70:
-            tgt_lat = float(-33.76522600900671)
-            tgt_lon = float(150.7418995647777)
-        elif counter == 100:
-            tgt_lat = float(-33.765408585430926)
-            tgt_lon = float(150.74102906288317)
+        if counter == 5:
+            tgt_lat = float(-33.76383286982121)
+            tgt_lon = float(150.74202924758947)
+        elif counter == 10:
+            tgt_lat = float(-33.762081650766085)
+            tgt_lon = float(150.74165100250792)
+        elif counter == 15:
+            tgt_lat = float(-33.75931429860247)
+            tgt_lon = float(150.71491330182425)
+            #tgt_lat = float(-33.76185881486868)
+            #tgt_lon = float(150.74341233532212)
+        elif counter == 20:
+            counter = 0
+            #tgt_lat = float(-33.75931429860247)
+            #tgt_lon = float(150.71491330182425)
+        elif counter == 25:
+            counter = 0
+        
         # Direction used later for target pointing
             
         pitch, yaw = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
