@@ -107,26 +107,20 @@ def main():
     last_raw = None
     smooth_pos = None
     live = None     # Live position(1) or fallback(0)
-    #filename = datetime.now().strftime("%Y%m%d_%H%M") + ".jsonl"
+    logname = datetime.now().strftime("%Y%m%d_%H%M") + ".jsonl"
 
     print("Initializing gimbal pose telemetry...\n")
     message = master.mav.command_long_encode(
-                master.target_system,  # Target system ID
-                master.target_component,  # Target component ID
-                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,  # ID of command to send
-                0,  # Confirmation
-                mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,  # param1: Message ID to be streamed or 285
-                100000, # param2: Interval in microseconds
-                0,       # param3 (unused)
-                0,       # param4 (unused)
-                0,       # param5 (unused)
-                0,       # param5 (unused)
-                0        # param6 (unused)
+                master.target_system, master.target_component,
+                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                0,
+                mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,  # ID: 285
+                100000, # Interval in microseconds
+                0, 0, 0, 0, 0        
                 )
     master.mav.send(message)
 
     response = master.recv_match(type='COMMAND_ACK', blocking=True)
-    
     if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
         print("Command accepted")
     else:
@@ -162,7 +156,7 @@ def main():
             master = connect_with_retry(args.port, args.baud)
             continue
         
-        gim_roll, gim_pitch, gim_yaw = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
+        roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
 
         # Smoothing filter
         if smooth_pos is None:
@@ -176,33 +170,34 @@ def main():
         lat, lon, alt = smooth_pos
 
         # compute angles and correct for heading
-        pitch, yaw = compute_angles(lat, lon, alt, TARGET_LAT, TARGET_LON, TARGET_ALT)
+        pitch_calc, yaw_calc = compute_angles(lat, lon, alt, TARGET_LAT, TARGET_LON, TARGET_ALT)
 
-        yaw_corrected = ((yaw - heading + 180) % 360 - 180) # Wrap 180
-
+        yaw_out = ((yaw_calc - heading + args.yaw_offset + 180) % 360 - 180) # Wrap 180
+        pitch_out = ((pitch_calc + args.pitch_offset + 180) % 360 - 180) # Wrap 180
         # To add: battery information
+
         payload = {
             "t": time.time(),
-            "type": "Position",
+            "type": "Telem",
             "lat": lat,
             "lon": lon,
             "alt": alt,
             "heading": heading,
             "live": live,
-            "target lat": tgt_lat,
-            "target lon": tgt_lon,
-            "target alt": tgt_alt,
-            "computed yaw": yaw,
-            "corrected yaw": yaw_corrected,
-            "computed pitch": pitch,
-            "gimbal roll": gim_roll,
-            "gimbal pitch": gim_pitch,
-            "gimbal yaw": gim_yaw,
+            "tgt_lat": TARGET_LAT,
+            "tgt_lon": TARGET_LON,
+            "tgt_alt": TARGET_ALT,
+            "yaw_calc": yaw_calc,
+            "yaw_out": yaw_out,
+            "pitch_calc": pitch_calc,
+            "roll_meas": roll_meas,
+            "pitch_meas": pitch_meas,
+            "yaw_meas": yaw_meas,
         }
 
         # Debug / Logging
         #print(payload)
-        #with open(filename, "a") as f:
+        #with open(logname, "a") as f:
         #    f.write(json.dumps(payload) + "\n")
         
         # Gimbal Control
@@ -211,9 +206,9 @@ def main():
                 master.target_system, master.target_component,
                 mavutil.mavlink.MAV_CMD_DO_MOUNT_CONTROL,
                 0,
-                pitch,#pitch + args.pitch_offset,
+                pitch_out,
                 0,
-                yaw_corrected, #Wrap 180
+                yaw_out,
                 0, 0, 0,
                 2
             )

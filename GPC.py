@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import time, math, signal, sys, argparse
-from pymavlink import mavutil
+from pymavlink import mavutil, mavextra
 import json
 from datetime import datetime
 # --------------------
@@ -29,20 +29,16 @@ def compute_angles(lat0, lon0, alt0, lat1, lon1, alt1):
     elev = math.degrees(math.atan2(du, math.hypot(dn, de)))
     return elev, bearing
 
-# Grabbed from google, hope this works
 def quaternion_to_euler(w, x, y, z):
-    # Roll (x-axis rotation)
     t0 = +2.0 * (w * x + y * z)
     t1 = +1.0 - 2.0 * (x * x + y * y)
     roll = math.degrees(math.atan2(t0, t1))
 
-    # Pitch (y-axis rotation)
     t2 = +2.0 * (w * y - z * x)
     t2 = +1.0 if t2 > +1.0 else t2
     t2 = -1.0 if t2 < -1.0 else t2
     pitch = math.degrees(math.asin(t2))
 
-    # Yaw (z-axis rotation)
     t3 = +2.0 * (w * z + x * y)
     t4 = +1.0 - 2.0 * (y * y + z * z)
     yaw = math.degrees(math.atan2(t3, t4))
@@ -82,14 +78,13 @@ def main():
     dt = 1.0 / args.rate
     alpha = args.smooth
     dist = args.distance
+
     # Load fallback override
     if args.fallback:
         fb = args.fallback.split(",")
         fallback = (float(fb[0]), float(fb[1]), float(fb[2]))
     else:
         fallback = DEFAULT_FALLBACK
-
-    
 
     # --------------------
     # CONNECT WITH RETRY
@@ -111,28 +106,20 @@ def main():
     last_raw = None
     smooth_pos = None
     live = None     # Live position(1) or fallback(0)
-    filename = datetime.now().strftime("%Y%m%d_%H%M") + ".jsonl"
+    logname = datetime.now().strftime("%Y%m%d_%H%M") + ".jsonl"
     direction = None # For direction input
 
     print("Initializing gimbal pose telemetry...\n")
     message = master.mav.command_long_encode(
-                master.target_system,  # Target system ID
-                master.target_component,  # Target component ID
-                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,  # ID of command to send
+                master.target_system, master.target_component,
+                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
                 0,  # Confirmation
-                mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,  # param1: Message ID to be streamed or 285
+                mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,  # ID: 285
                 100000, # param2: Interval in microseconds
-                0,       # param3 (unused)
-                0,       # param4 (unused)
-                0,       # param5 (unused)
-                0,       # param5 (unused)
-                0        # param6 (unused)
+                0, 0, 0, 0, 0        
                 )
-
-    # Send the COMMAND_LONG
     master.mav.send(message)
 
-    # Wait for a response (blocking) to the MAV_CMD_SET_MESSAGE_INTERVAL command and print result
     response = master.recv_match(type='COMMAND_ACK', blocking=True)
     if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
         print("Command accepted")
@@ -141,7 +128,6 @@ def main():
 
     print("Running...\n")
     while True:
-
         # If cube disconnects mid‑run — reconnect
         try:
             msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
@@ -162,7 +148,7 @@ def main():
 
         heading = msg.hdg / 100.0   # Heading SHOULD always return result
 
-        # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
+        # Gimbal RPY
         try:
             msg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
         except Exception:
@@ -170,8 +156,8 @@ def main():
             master = connect_with_retry(args.port, args.baud)
             continue
         
-        gim_roll, gim_pitch, gim_yaw = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
-        # -------------- GIMBAL DATA REQUEST TEST BLOCK ----------------------------------
+        roll_meas, pitch_meas, yaw_meas = mavextra.quat_to_euler(msg.q)
+        #roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
 
         # Smoothing filter
         if smooth_pos is None:
@@ -213,47 +199,50 @@ def main():
         elif direction == "2":
             tgt_lat = float(-33.765408585430926)
             tgt_lon = float(150.74102906288317)
-        pitch, yaw = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
+        pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
 
         if direction == "A":
             yaw = float(input("Yaw angle:"))
             pitch = float(input("Pitch angle:"))
-        yaw_corrected = ((yaw - heading + 180) % 360 - 180) # Wrap 180
-
+        yaw_out = ((yaw_calc - heading + args.yaw_offset + 180) % 360 - 180) # Wrap 180
+        pitch_out = ((pitch_calc + args.pitch_offset + 180) % 360 - 180) # Wrap 180
+        
         # To add: battery information, computed roll
         payload = {
             "t": time.time(),
-            "type": "Position",
+            "type": "Telem",
             "lat": lat,
             "lon": lon,
             "alt": alt,
             "heading": heading,
             "live": live,
-            "target lat": tgt_lat,
-            "target lon": tgt_lon,
-            "target alt": tgt_alt,
-            "computed yaw": yaw,
-            "corrected yaw": yaw_corrected,
-            "computed pitch": pitch,
-            "gimbal roll": gim_roll,
-            "gimbal pitch": gim_pitch,
-            "gimbal yaw": gim_yaw,
+            "tgt_lat": tgt_lat,
+            "tgt_lon": tgt_lon,
+            "tgt_alt": tgt_alt,
+            "yaw_calc": yaw_calc,
+            "yaw_out": yaw_out,
+            "pitch_calc": pitch_calc,
+            "roll_meas": roll_meas,
+            "pitch_meas": pitch_meas,
+            "yaw_meas": yaw_meas,
         }
 
         # Debug / Logging
-        print(payload)
-        with open(filename, "a") as f:
+        #print(payload)
+        with open(logname, "a") as f:
             f.write(json.dumps(payload) + "\n")
         
+        print(master.recv_match().to_dict()) # Check everything im receiving
+
         # Gimbal Control
         try:
             master.mav.command_long_send(
                 master.target_system, master.target_component,
                 mavutil.mavlink.MAV_CMD_DO_MOUNT_CONTROL,
                 0,
-                pitch,#pitch + args.pitch_offset,
+                pitch_out,
                 0,
-                yaw_corrected, #Wrap 180
+                yaw_out,
                 0, 0, 0,
                 2
             )
