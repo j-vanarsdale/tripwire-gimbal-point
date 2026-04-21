@@ -196,7 +196,7 @@ def main():
         }
 
         # Debug / Logging
-        #print(payload)
+        print(payload)
         #with open(logname, "a") as f:
         #    f.write(json.dumps(payload) + "\n")
         

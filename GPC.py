@@ -16,7 +16,7 @@ DEFAULT_PITCH_OFFSET = 0.0
 DEFAULT_RATE = 10
 DEFAULT_SMOOTH = 0.1   # smoothing factor (0–1), smoothed = smoothed + alpha * (new-smoothed)
 
-DEFAULT_MODE = 1
+DEFAULT_MODE = 2
 DEFAULT_DISTANCE = 0.1
 # --------------------
 
@@ -156,8 +156,8 @@ def main():
             master = connect_with_retry(args.port, args.baud)
             continue
         
-        roll_meas, pitch_meas, yaw_meas = mavextra.quat_to_euler(msg.q)
-        #roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
+        #roll_meas= mavextra.quat_to_euler(msg.q)
+        roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
 
         # Smoothing filter
         if smooth_pos is None:
@@ -180,7 +180,7 @@ def main():
             direction = input("Set Look to (N/S/E/W) | Presets (A/T/1/2):  ")
         elif args.mode == 1:
             tgt_lon = float(lon - dist)
-        
+                
         # Adjust lat/lon to look ~10 km in that direction (for dist default = 0.1)
         if direction == "N":
             tgt_lat = float(lat + dist)
@@ -202,8 +202,8 @@ def main():
         pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
 
         if direction == "A":
-            yaw = float(input("Yaw angle:"))
-            pitch = float(input("Pitch angle:"))
+            yaw_calc = float(input("Yaw angle:"))
+            pitch_calc = float(input("Pitch angle:"))
         yaw_out = ((yaw_calc - heading + args.yaw_offset + 180) % 360 - 180) # Wrap 180
         pitch_out = ((pitch_calc + args.pitch_offset + 180) % 360 - 180) # Wrap 180
         
@@ -228,11 +228,11 @@ def main():
         }
 
         # Debug / Logging
-        #print(payload)
+        print(payload)
         with open(logname, "a") as f:
             f.write(json.dumps(payload) + "\n")
         
-        print(master.recv_match().to_dict()) # Check everything im receiving
+        #print(master.recv_match(type="GPS_RAW_INT", blocking=True).to_dict()) # Check everything im receiving
 
         # Gimbal Control
         try:
