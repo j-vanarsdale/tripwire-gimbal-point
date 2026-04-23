@@ -127,10 +127,11 @@ def main():
         print("Command failed")
 
     print("Running...\n")
+    init_run = True
     while True:
         # If cube disconnects mid‑run — reconnect
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=init_run)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -139,24 +140,26 @@ def main():
         live = 0    # Assume fallback default
 
         # Check for GPS and update position
-        if msg.lat != 0:
-            last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
-            fallback = last_raw
-            live = 1
-        else:
-            last_raw = fallback
+        if msg:
+            if msg.lat != 0:
+                last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
+                fallback = last_raw
+                live = 1
+            else:
+                last_raw = fallback
 
-        heading = msg.hdg / 100.0
+        if msg:
+            heading = msg.hdg / 100.0
 
         # Gimbal RPY
         try:
-            msg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
+            msg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=init_run)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
             continue
-        
-        roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
+        if msg:
+            roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
 
         # Smoothing filter
         if smooth_pos is None:
@@ -217,7 +220,7 @@ def main():
             master = connect_with_retry(args.port, args.baud)
             continue
 
-
+        init_run = False
         time.sleep(dt)
 
 if __name__ == "__main__":

@@ -128,6 +128,8 @@ def main():
 
     print("Running...\n")
     while True:
+        # "GLOBAL_POSITION_INT","GIMBAL_DEVICE_ATTITUDE_STATUS", "ATTITUDE", "VFR_HUD"
+
         # If cube disconnects mid‑run — reconnect
         try:
             msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
@@ -156,7 +158,6 @@ def main():
             master = connect_with_retry(args.port, args.baud)
             continue
         
-        #roll_meas= mavextra.quat_to_euler(msg.q)
         roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
 
         # Smoothing filter
@@ -175,11 +176,13 @@ def main():
         tgt_lon = float(lon)
         tgt_alt = float(alt) # Later to be called by actual target alt
 
-        if args.mode == 2:
+
+        if args.mode == 1:
+                    tgt_lon = float(lon - dist)
+        elif args.mode == 2:
             # Direction used later for target pointing
             direction = input("Set Look to (N/S/E/W) | Presets (A/T/1/2):  ")
-        elif args.mode == 1:
-            tgt_lon = float(lon - dist)
+        
                 
         # Adjust lat/lon to look ~10 km in that direction (for dist default = 0.1)
         if direction == "N":
