@@ -191,7 +191,8 @@ def main():
         # compute angles and correct for heading
         pitch_calc, yaw_calc = compute_angles(lat, lon, alt, TARGET_LAT, TARGET_LON, TARGET_ALT)
 
-        yaw_out = ((yaw_calc - heading + args.yaw_offset + 180) % 360 - 180) # Wrap 180
+        #yaw_out = ((yaw_calc - heading + args.yaw_offset + 180) % 360 - 180) # Wrap 180
+        yaw_out = ((yaw_calc + args.yaw_offset + 180) % 360 - 180) # Wrap 180
         pitch_out = ((pitch_calc + args.pitch_offset + 180) % 360 - 180) # Wrap 180
         # To add: battery information
 
@@ -223,13 +224,15 @@ def main():
         try:
             master.mav.command_long_send(
                 master.target_system, master.target_component,
-                mavutil.mavlink.MAV_CMD_DO_MOUNT_CONTROL,
+                mavutil.mavlink.MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW,
                 0,
                 pitch_out,
-                0,
                 yaw_out,
-                0, 0, 0,
-                2
+                1, # pitch rate deg/s
+                1, # yaw rate deg/s
+                16, # 0=bodyframe 16=earthframe
+                0,
+                0
             )
         except Exception:
             print("Send failure. Reconnecting...")

@@ -14,7 +14,7 @@ DEFAULT_BAUD        = 115200
 DEFAULT_FALLBACK    = (-33.76535, 150.74087, 0.0)   # lat, lon, alt
 DEFAULT_YAW_OFFSET  = 0.0
 DEFAULT_PITCH_OFFSET= 0.0
-DEFAULT_RATE        = 10
+DEFAULT_PERIOD        = 2
 DEFAULT_SMOOTH      = 0.1   # smoothing factor (0–1)
 DEFAULT_API_PORT    = 5000
 # --------------------
@@ -147,7 +147,7 @@ def connect_with_retry(port, baud):
 def gimbal_loop(args, fallback):
     global latest_payload
 
-    dt    = 1.0 / args.rate
+    update_period    = args.period * 1e6
     alpha = args.smooth
 
     master   = connect_with_retry(args.port, args.baud)
@@ -175,7 +175,7 @@ def gimbal_loop(args, fallback):
         mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
         0,
         mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,
-        100000, 0, 0, 0, 0, 0,
+        update_period, 0, 0, 0, 0, 0,
     )
     master.mav.send(message)
 
@@ -193,7 +193,7 @@ def gimbal_loop(args, fallback):
     while True:
         # ---- GPS position ----
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=init_run)
+            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -212,7 +212,7 @@ def gimbal_loop(args, fallback):
 
         # ---- Gimbal attitude ----
         try:
-            gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=init_run)
+            gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -287,7 +287,7 @@ def gimbal_loop(args, fallback):
             continue
 
         init_run = False
-        time.sleep(dt)
+        
 
 
 # --------------------
@@ -301,7 +301,7 @@ def main():
     parser.add_argument("--fallback",     type=str,   help="lat,lon,alt")
     parser.add_argument("--yaw_offset",   type=float, default=DEFAULT_YAW_OFFSET)
     parser.add_argument("--pitch_offset", type=float, default=DEFAULT_PITCH_OFFSET)
-    parser.add_argument("--rate",         type=int,   default=DEFAULT_RATE)
+    parser.add_argument("--period",         type=float,   default=DEFAULT_PERIOD)
     parser.add_argument("--smooth",       type=float, default=DEFAULT_SMOOTH,
                         help="Smoothing factor: 1=fast, 0.5=smooth, 0=hold value")
     parser.add_argument("--api_port",     type=int,   default=DEFAULT_API_PORT,
