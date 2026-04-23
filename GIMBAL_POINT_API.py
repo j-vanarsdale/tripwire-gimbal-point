@@ -16,7 +16,7 @@ DEFAULT_YAW_OFFSET  = 0.0
 DEFAULT_PITCH_OFFSET= 0.0
 DEFAULT_PERIOD        = 2
 DEFAULT_SMOOTH      = 0.1   # smoothing factor (0–1)
-DEFAULT_API_PORT    = 5000
+DEFAULT_API_PORT    = 5001
 # --------------------
 
 app = Flask(__name__)
