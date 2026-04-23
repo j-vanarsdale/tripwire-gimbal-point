@@ -147,7 +147,7 @@ def connect_with_retry(port, baud):
 def gimbal_loop(args, fallback):
     global latest_payload
 
-    update_period    = args.period * 1e6
+    update_period    = int((args.period * 1e6)/2)
     alpha = args.smooth
 
     master   = connect_with_retry(args.port, args.baud)
@@ -175,6 +175,25 @@ def gimbal_loop(args, fallback):
         mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
         0,
         mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,
+        update_period, 0, 0, 0, 0, 0,
+    )
+    master.mav.send(message)
+
+    response = master.recv_match(type="COMMAND_ACK", blocking=True)
+    if (response
+            and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
+            and response.result  == mavutil.mavlink.MAV_RESULT_ACCEPTED):
+        print("Command accepted")
+    else:
+        print("Command failed or no ACK received")
+
+        # Request gimbal attitude at 10 Hz
+    print("Initializing cube pose telemetry...\n")
+    message = master.mav.command_long_encode(
+        master.target_system, master.target_component,
+        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+        0,
+        mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
         update_period, 0, 0, 0, 0, 0,
     )
     master.mav.send(message)
