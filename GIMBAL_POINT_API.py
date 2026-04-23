@@ -187,32 +187,22 @@ def gimbal_loop(args, fallback):
     else:
         print("Command failed or no ACK received")
 
-        # Request gimbal attitude at 10 Hz
-    print("Initializing cube pose telemetry...\n")
-    message = master.mav.command_long_encode(
-        master.target_system, master.target_component,
-        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-        0,
-        mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
-        update_period, 0, 0, 0, 0, 0,
-    )
-    master.mav.send(message)
-
-    response = master.recv_match(type="COMMAND_ACK", blocking=True)
-    if (response
-            and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
-            and response.result  == mavutil.mavlink.MAV_RESULT_ACCEPTED):
-        print("Command accepted")
-    else:
-        print("Command failed or no ACK received")
-
     print("Running...\n")
     init_run = True
 
     while True:
         # ---- GPS position ----
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=init_run)
+            msg = None
+
+            if init_run:
+                msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+
+            while True:
+                m = master.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
+                if m is None:
+                    break
+                msg = m
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -231,7 +221,16 @@ def gimbal_loop(args, fallback):
 
         # ---- Gimbal attitude ----
         try:
-            gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=init_run)
+            gmsg = None
+
+            if init_run:
+                gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
+
+            while True:
+                gm = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=False)
+                if gm is None:
+                    break
+                gmsg = gm
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
