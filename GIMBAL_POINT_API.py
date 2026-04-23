@@ -193,7 +193,7 @@ def gimbal_loop(args, fallback):
     while True:
         # ---- GPS position ----
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=init_run)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -212,7 +212,7 @@ def gimbal_loop(args, fallback):
 
         # ---- Gimbal attitude ----
         try:
-            gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
+            gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=init_run)
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -290,7 +290,7 @@ def gimbal_loop(args, fallback):
             print("Send failure. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
             continue
-
+        time.sleep(args.period)
         init_run = False
         
 
