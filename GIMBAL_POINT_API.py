@@ -168,25 +168,6 @@ def gimbal_loop(args, fallback):
     signal.signal(signal.SIGINT,  cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    # Request gimbal attitude at 10 Hz
-    print("Initializing gimbal pose telemetry...\n")
-    message = master.mav.command_long_encode(
-        master.target_system, master.target_component,
-        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-        0,
-        mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,
-        update_period, 0, 0, 0, 0, 0,
-    )
-    master.mav.send(message)
-
-    response = master.recv_match(type="COMMAND_ACK", blocking=True)
-    if (response
-            and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
-            and response.result  == mavutil.mavlink.MAV_RESULT_ACCEPTED):
-        print("Command accepted")
-    else:
-        print("Command failed or no ACK received")
-
     print("Running...\n")
     init_run = True
 
