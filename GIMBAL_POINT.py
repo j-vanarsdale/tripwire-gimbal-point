@@ -21,7 +21,7 @@ DEFAULT_FALLBACK = (-33.76535, 150.74087, 0.0)  # lat, lon, alt
 DEFAULT_YAW_OFFSET = 0.0
 DEFAULT_PITCH_OFFSET = 0.0
 
-DEFAULT_RATE = 10
+DEFAULT_PERIOD = 2
 DEFAULT_SMOOTH = 0.1   # smoothing factor (0–1), smoothed = smoothed + alpha * (new-smoothed)
 # --------------------
 
@@ -71,13 +71,12 @@ def main():
     parser.add_argument("--fallback", type=str, help="lat,lon,alt")
     parser.add_argument("--yaw_offset", type=float, default=DEFAULT_YAW_OFFSET)
     parser.add_argument("--pitch_offset", type=float, default=DEFAULT_PITCH_OFFSET)
-    parser.add_argument("--rate", type=int, default=DEFAULT_RATE)
+    parser.add_argument("--period", type=int, default=DEFAULT_PERIOD)
     parser.add_argument("--smooth", type=float, default=DEFAULT_SMOOTH,
                         help="Smoothing factor: 1=fast, 0.5=smooth, 0=hold value")
 
     args = parser.parse_args()
     
-    dt = 1.0 / args.rate
     alpha = args.smooth
 
     # Load fallback override
@@ -104,80 +103,46 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
+    # ---- Initial states ----
     last_raw = None
     smooth_pos = None
     live = None     # Live position(1) or fallback(0)
     logname = datetime.now().strftime("%Y%m%d_%H%M") + ".jsonl"
+    telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS','GPS_RAW_INT','EKF_STATUS_REPORT']
 
-    print("Initializing gimbal pose telemetry...\n")
-    message = master.mav.command_long_encode(
-                master.target_system, master.target_component,
-                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-                0,
-                mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,  # ID: 285
-                100000, # Interval in microseconds
-                0, 0, 0, 0, 0        
-                )
-    master.mav.send(message)
-
-    response = master.recv_match(type='COMMAND_ACK', blocking=True)
-    if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-        print("Command accepted")
-    else:
-        print("Command failed")
-
-    print("Setting position message frequency...\n")
-    message = master.mav.command_long_encode(
-                master.target_system, master.target_component,
-                mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-                0,
-                mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,  # ID: 285
-                100000, # Interval in microseconds
-                0, 0, 0, 0, 0        
-                )
-    master.mav.send(message)
-
-    response = master.recv_match(type='COMMAND_ACK', blocking=True)
-    if response and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL and response.result == mavutil.mavlink.MAV_RESULT_ACCEPTED:
-        print("Command accepted")
-    else:
-        print("Command failed")
     print("Running...\n")
-    init_run = True
     while True:
-        # If cube disconnects mid‑run — reconnect
+        # ---- Recieve data ----
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=init_run)
+            while master.recv_match(blocking=False):
+                pass
+
+            if not all(master.messages.get(name) for name in telem_fields):
+                continue
+            msg = master.messages['GLOBAL_POSITION_INT']
+            gmsg = master.messages['GIMBAL_DEVICE_ATTITUDE_STATUS']
+            pmsg = master.messages['GPS_RAW_INT']
+            emsg = master.messages['EKF_STATUS_REPORT']
+
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
             continue
-        
+
+        # ---- GPS position ----
         live = 0    # Assume fallback default
+        #print(emsg.flags)
+        if pmsg.eph < 100:
+            last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
+            fallback = last_raw
+            live = 1
+        else:
+            last_raw = fallback
+        heading = msg.hdg / 100.0
 
-        # Check for GPS and update position
-        if msg:
-            if msg.lat != 0:
-                last_raw = (msg.lat/1e7, msg.lon/1e7, msg.alt/1000)
-                fallback = last_raw
-                live = 1
-            else:
-                last_raw = fallback
+        roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(gmsg.q[0], gmsg.q[1], gmsg.q[2], gmsg.q[3])
 
-        if msg:
-            heading = msg.hdg / 100.0
-
-        # Gimbal RPY
-        try:
-            msg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=init_run)
-        except Exception:
-            print("Lost connection. Reconnecting...")
-            master = connect_with_retry(args.port, args.baud)
-            continue
-        if msg:
-            roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(msg.q[0], msg.q[1], msg.q[2], msg.q[3])
-
-        # Smoothing filter
+        # ---- Smoothing ----
         if smooth_pos is None:
             smooth_pos = last_raw
         else:
@@ -188,14 +153,13 @@ def main():
 
         lat, lon, alt = smooth_pos
 
-        # compute angles and correct for heading
+        # ---- Angle computation ----
         pitch_calc, yaw_calc = compute_angles(lat, lon, alt, TARGET_LAT, TARGET_LON, TARGET_ALT)
 
-        #yaw_out = ((yaw_calc - heading + args.yaw_offset + 180) % 360 - 180) # Wrap 180
         yaw_out = ((yaw_calc + args.yaw_offset + 180) % 360 - 180) # Wrap 180
         pitch_out = ((pitch_calc + args.pitch_offset + 180) % 360 - 180) # Wrap 180
-        # To add: battery information
 
+        # ---- update telemetry ----
         payload = {
             "t": time.time(),
             "type": "Telem",
@@ -213,14 +177,15 @@ def main():
             "roll_meas": roll_meas,
             "pitch_meas": pitch_meas,
             "yaw_meas": yaw_meas,
+            "gimbal_heading":heading+yaw_meas,
         }
 
-        # Debug / Logging
+        # ---- Logger ----
         print(payload)
-        #with open(logname, "a") as f:
-        #    f.write(json.dumps(payload) + "\n")
+        with open(logname, "a") as f:
+            f.write(json.dumps(payload) + "\n")
         
-        # Gimbal Control
+        # ---- Gimbal control ----
         try:
             master.mav.command_long_send(
                 master.target_system, master.target_component,
@@ -239,8 +204,7 @@ def main():
             master = connect_with_retry(args.port, args.baud)
             continue
 
-        init_run = False
-        time.sleep(dt)
+        time.sleep(args.period)
 
 if __name__ == "__main__":
     main()
