@@ -29,8 +29,8 @@ state_lock = threading.Lock()
 
 # USER INPUTS — updated via PUT /target
 target = {
-    "lat": -33.76535,
-    "lon": 150.64087,
+    "lat": -33.66535,
+    "lon": 150.74087,
     "alt": 50.0,
 }
 
