@@ -19,6 +19,13 @@ DEFAULT_SMOOTH      = 0.1   # smoothing factor (0–1)
 DEFAULT_API_PORT    = 5001
 # --------------------
 
+# MAVLink gimbal frame flags
+# MAV_GIMBAL_DEVICE_FLAGS:
+#   bit 4 (16) = YAW_LOCK (earth-frame yaw)
+#   bit 5 (32) = PITCHYAW_ABSOLUTE  — combined with bit 4 gives 48 (vehicle) or 80 (earth)
+FRAME_FLAG_VEHICLE = 48   # pantilt["frame"] == True  → vehicle/body frame
+FRAME_FLAG_EARTH   = 80   # pantilt["frame"] == False → earth frame
+
 app = Flask(__name__)
 
 # --------------------
@@ -27,75 +34,31 @@ app = Flask(__name__)
 # --------------------
 state_lock = threading.Lock()
 
-# USER INPUTS — updated via PUT /target
+# USER INPUTS — target updated via PUT /target (triggers angle recompute)
+#               pantilt updated directly via PUT /rc, or indirectly via PUT /target
 target = {
     "lat": -33.76535,
     "lon": 150.64087,
     "alt": 50.0,
 }
 
+# pantilt is the single source of truth for the gimbal loop.
+# "pan"   — yaw angle (degrees)
+# "tilt"  — pitch angle (degrees)
+# "frame" — False = earth frame (flag 80), True = vehicle/body frame (flag 48)
+pantilt = {
+    "pan":   0.0,
+    "tilt":  0.0,
+    "frame": False,
+}
+
 # API OUTPUT — updated by gimbal loop, read via GET /telemetry
 latest_payload = {}
+
+# Mode flag — True = target lat/lon/alt tracking mode (loop recomputes angles every tick)
+#              False = RC mode (loop uses pantilt values as-is)
+targeting_active = False
 # --------------------
-
-
-# --------------------
-# FLASK ROUTES
-# --------------------
-
-@app.route("/target", methods=["PUT"])
-def put_target():
-    """
-    Update the gimbal target position.
-
-    Expected JSON body (all fields optional):
-        {
-            "lat": <float>,
-            "lon": <float>,
-            "alt": <float>
-        }
-
-    Returns the updated target.
-    """
-    data = request.get_json(force=True, silent=True)
-    if not data:
-        return jsonify({"error": "Invalid or missing JSON body"}), 400
-
-    allowed = {"lat", "lon", "alt"}
-    unknown = set(data.keys()) - allowed
-    if unknown:
-        return jsonify({"error": f"Unknown fields: {unknown}"}), 400
-
-    with state_lock:
-        for key in allowed:
-            if key in data:
-                try:
-                    target[key] = float(data[key])
-                except (TypeError, ValueError):
-                    return jsonify({"error": f"Field '{key}' must be a number"}), 400
-        updated = dict(target)
-
-    return jsonify({"status": "ok", "target": updated}), 200
-
-
-@app.route("/target", methods=["GET"])
-def get_target():
-    """Return the current target position."""
-    with state_lock:
-        current = dict(target)
-    return jsonify(current), 200
-
-
-@app.route("/telemetry", methods=["GET"])
-def get_telemetry():
-    """Return the latest telemetry payload from the gimbal loop."""
-    with state_lock:
-        payload = dict(latest_payload)
-
-    if not payload:
-        return jsonify({"error": "No telemetry available yet"}), 503
-
-    return jsonify(payload), 200
 
 
 # --------------------
@@ -109,7 +72,7 @@ def compute_angles(lat0, lon0, alt0, lat1, lon1, alt1):
     dn, de, du = R * dlat, R * dlon, alt1 - alt0
     bearing = math.degrees(math.atan2(de, dn))
     elev    = math.degrees(math.atan2(du, math.hypot(dn, de)))
-    return elev, bearing
+    return elev, bearing   # (pitch, yaw)
 
 
 def quaternion_to_euler(w, x, y, z):
@@ -141,13 +104,141 @@ def connect_with_retry(port, baud):
 
 
 # --------------------
+# FLASK ROUTES
+# --------------------
+
+
+@app.route("/target", methods=["PUT"])
+def put_target():
+    """
+    Update the gimbal target position and activate targeting mode.
+    The gimbal loop will recompute pan/tilt angles from the target every tick,
+    tracking the vehicle as it moves. Frame is automatically set to earth frame.
+
+    Expected JSON body (all fields optional):
+        {
+            "lat": <float>,
+            "lon": <float>,
+            "alt": <float>
+        }
+
+    Returns the updated target.
+    """
+    global targeting_active
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    allowed = {"lat", "lon", "alt"}
+    unknown = set(data.keys()) - allowed
+    if unknown:
+        return jsonify({"error": f"Unknown fields: {unknown}"}), 400
+
+    with state_lock:
+        for key in allowed:
+            if key in data:
+                try:
+                    target[key] = float(data[key])
+                except (TypeError, ValueError):
+                    return jsonify({"error": f"Field '{key}' must be a number"}), 400
+
+        targeting_active = True
+        updated_target = dict(target)
+
+    return jsonify({
+        "status":  "ok",
+        "target":  updated_target,
+        "mode":    "targeting",
+    }), 200
+
+
+@app.route("/target", methods=["GET"])
+def get_target():
+    """Return the current target position."""
+    with state_lock:
+        current = dict(target)
+    return jsonify(current), 200
+
+
+@app.route("/rc", methods=["PUT"])
+def put_pantilt():
+    """
+    Directly set gimbal pan/tilt angles and/or frame of reference.
+    Deactivates targeting mode — angles will no longer be recomputed from lat/lon.
+    Call PUT /target to re-enable targeting mode.
+
+    Expected JSON body (all fields optional):
+        {
+            "pan":   <float>,          # yaw angle in degrees
+            "tilt":  <float>,          # pitch angle in degrees
+            "frame": <bool>            # false = earth frame (flag 80),
+                                       # true  = vehicle/body frame (flag 48)
+        }
+
+    Returns the updated pantilt state.
+    """
+    global targeting_active
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    allowed = {"pan", "tilt", "frame"}
+    unknown = set(data.keys()) - allowed
+    if unknown:
+        return jsonify({"error": f"Unknown fields: {unknown}"}), 400
+
+    with state_lock:
+        if "pan" in data:
+            try:
+                pantilt["pan"] = float(data["pan"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "Field 'pan' must be a number"}), 400
+
+        if "tilt" in data:
+            try:
+                pantilt["tilt"] = float(data["tilt"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "Field 'tilt' must be a number"}), 400
+
+        if "frame" in data:
+            if not isinstance(data["frame"], bool):
+                return jsonify({"error": "Field 'frame' must be a boolean"}), 400
+            pantilt["frame"] = data["frame"]
+
+        targeting_active = False
+        updated = dict(pantilt)
+
+    return jsonify({"status": "ok", "pantilt": updated, "mode": "rc"}), 200
+
+
+@app.route("/rc", methods=["GET"])
+def get_pantilt():
+    """Return the current pan/tilt state."""
+    with state_lock:
+        current = dict(pantilt)
+    return jsonify(current), 200
+
+
+@app.route("/telemetry", methods=["GET"])
+def get_telemetry():
+    """Return the latest telemetry payload from the gimbal loop."""
+    with state_lock:
+        payload = dict(latest_payload)
+
+    if not payload:
+        return jsonify({"error": "No telemetry available yet"}), 503
+
+    return jsonify(payload), 200
+
+
+# --------------------
 # GIMBAL LOOP
 # --------------------
 
 def gimbal_loop(args, fallback):
     global latest_payload
 
-    update_period    = int((args.period * 1e6)/2)
+    update_period = int((args.period * 1e6) / 2)
     alpha = args.smooth
 
     master   = connect_with_retry(args.port, args.baud)
@@ -168,7 +259,7 @@ def gimbal_loop(args, fallback):
     signal.signal(signal.SIGINT,  cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    # Request gimbal attitude at 10 Hz
+    # Request gimbal attitude telemetry
     print("Initializing gimbal pose telemetry...\n")
     message = master.mav.command_long_encode(
         master.target_system, master.target_component,
@@ -187,7 +278,7 @@ def gimbal_loop(args, fallback):
     else:
         print("Command failed or no ACK received")
 
-        # Request gimbal attitude at 10 Hz
+    # Request platform GPS telemetry
     print("Initializing cube pose telemetry...\n")
     message = master.mav.command_long_encode(
         master.target_system, master.target_component,
@@ -256,19 +347,31 @@ def gimbal_loop(args, fallback):
 
         lat, lon, alt = smooth_pos
 
-        # ---- Read target atomically ----
+        # ---- Targeting mode: recompute pan/tilt from lat/lon every tick ----
+        # This runs inside the loop so angles stay correct as the vehicle moves.
+        # Targeting is always earth frame; frame flag is forced accordingly.
         with state_lock:
-            tgt_lat = target["lat"]
-            tgt_lon = target["lon"]
-            tgt_alt = target["alt"]
+            if targeting_active:
+                tgt_lat = target["lat"]
+                tgt_lon = target["lon"]
+                tgt_alt = target["alt"]
 
-        # ---- Angle computation ----
-        pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
+                pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
+                pantilt["pan"]   = (yaw_calc   + args.yaw_offset   + 180) % 360 - 180
+                pantilt["tilt"]  = (pitch_calc + args.pitch_offset  + 180) % 360 - 180
+                pantilt["frame"] = False   # targeting is always earth frame
 
-        yaw_out   = (yaw_calc    + args.yaw_offset   + 180) % 360 - 180
-        pitch_out = (pitch_calc            + args.pitch_offset + 180) % 360 - 180
+            pan_out           = pantilt["pan"]
+            tilt_out          = pantilt["tilt"]
+            use_vehicle_frame = pantilt["frame"]
+            mode              = "targeting" if targeting_active else "rc"
+
+        frame_flag = FRAME_FLAG_VEHICLE if use_vehicle_frame else FRAME_FLAG_EARTH
 
         # ---- API OUTPUT — update shared telemetry ----
+        with state_lock:
+            telem_target = dict(target) if targeting_active else None
+
         payload = {
             "t":          time.time(),
             "type":       "Telem",
@@ -277,12 +380,11 @@ def gimbal_loop(args, fallback):
             "alt":        alt,
             "heading":    heading,
             "live":       live,
-            "tgt_lat":    tgt_lat,
-            "tgt_lon":    tgt_lon,
-            "tgt_alt":    tgt_alt,
-            "yaw_calc":   yaw_calc,
-            "yaw_out":    yaw_out,
-            "pitch_calc": pitch_calc,
+            "target":     telem_target,
+            "pan_out":    pan_out,
+            "tilt_out":   tilt_out,
+            "frame_flag": frame_flag,
+            "mode":       mode,
             "roll_meas":  roll_meas,
             "pitch_meas": pitch_meas,
             "yaw_meas":   yaw_meas,
@@ -297,21 +399,21 @@ def gimbal_loop(args, fallback):
                 master.target_system, master.target_component,
                 mavutil.mavlink.MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW,
                 0,
-                pitch_out,
-                yaw_out,
-                1, # pitch rate deg/s
-                1, # yaw rate deg/s
-                16, # 0=bodyframe 16=earthframe
+                tilt_out,   # pitch
+                pan_out,    # yaw
+                1,          # pitch rate deg/s
+                1,          # yaw rate deg/s
+                frame_flag, # 48 = vehicle frame, 80 = earth frame
                 0,
-                0
+                0,
             )
         except Exception:
             print("Send failure. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
             continue
+
         time.sleep(args.period)
         init_run = False
-        
 
 
 # --------------------
@@ -325,11 +427,11 @@ def main():
     parser.add_argument("--fallback",     type=str,   help="lat,lon,alt")
     parser.add_argument("--yaw_offset",   type=float, default=DEFAULT_YAW_OFFSET)
     parser.add_argument("--pitch_offset", type=float, default=DEFAULT_PITCH_OFFSET)
-    parser.add_argument("--period",         type=float,   default=DEFAULT_PERIOD)
+    parser.add_argument("--period",       type=float, default=DEFAULT_PERIOD)
     parser.add_argument("--smooth",       type=float, default=DEFAULT_SMOOTH,
                         help="Smoothing factor: 1=fast, 0.5=smooth, 0=hold value")
     parser.add_argument("--api_port",     type=int,   default=DEFAULT_API_PORT,
-                        help="Flask API port (default: 5000)")
+                        help="Flask API port (default: 5001)")
     args = parser.parse_args()
 
     # Resolve fallback
