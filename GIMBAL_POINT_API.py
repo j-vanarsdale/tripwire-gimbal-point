@@ -37,8 +37,8 @@ state_lock = threading.Lock()
 # USER INPUTS — target updated via PUT /target (triggers angle recompute)
 #               pantilt updated directly via PUT /rc, or indirectly via PUT /target
 target = {
-    "lat": -33.76535,
-    "lon": 150.64087,
+    "lat": -33.66535,
+    "lon": 150.74087,
     "alt": 50.0,
 }
 
@@ -247,7 +247,7 @@ def gimbal_loop(args, fallback):
     heading    = 0.0
     roll_meas  = pitch_meas = yaw_meas = 0.0
     live = 0
-
+    telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
     def cleanup(*_):
         print("Closing connection...")
         try:
@@ -303,7 +303,22 @@ def gimbal_loop(args, fallback):
     while True:
         # ---- GPS position ----
         try:
-            msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=init_run)
+            while master.recv_match(blocking=False):
+                pass
+
+            if not all(master.messages.get(name) for name in telem_fields):
+                continue
+            msg = master.messages['GLOBAL_POSITION_INT']
+            gmsg = master.messages['GIMBAL_DEVICE_ATTITUDE_STATUS']
+            #msg = None
+            #if init_run:
+            #    msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+
+            #while True:
+            #    m = master.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
+            #    if m is None:
+            #        break
+            #    msg = m
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -321,12 +336,21 @@ def gimbal_loop(args, fallback):
             heading = msg.hdg / 100.0
 
         # ---- Gimbal attitude ----
-        try:
-            gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=init_run)
-        except Exception:
-            print("Lost connection. Reconnecting...")
-            master = connect_with_retry(args.port, args.baud)
-            continue
+        #try:
+        #    gmsg = None
+
+        #     if init_run:
+        #         gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
+
+        #     while True:
+        #         gm = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=False)
+        #         if gm is None:
+        #             break
+        #         gmsg = gm
+        # except Exception:
+        #     print("Lost connection. Reconnecting...")
+        #     master = connect_with_retry(args.port, args.baud)
+        #     continue
 
         if gmsg:
             roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(
