@@ -23,8 +23,8 @@ DEFAULT_API_PORT    = 5001
 # MAV_GIMBAL_DEVICE_FLAGS:
 #   bit 4 (16) = YAW_LOCK (earth-frame yaw)
 #   bit 5 (32) = PITCHYAW_ABSOLUTE  — combined with bit 4 gives 48 (vehicle) or 80 (earth)
-FRAME_FLAG_VEHICLE = 48   # pantilt["frame"] == True  → vehicle/body frame
-FRAME_FLAG_EARTH   = 80   # pantilt["frame"] == False → earth frame
+FRAME_FLAG_VEHICLE = 0   # pantilt["frame"] == True  → vehicle/body frame
+FRAME_FLAG_EARTH   = 16   # pantilt["frame"] == False → earth frame
 
 app = Flask(__name__)
 
