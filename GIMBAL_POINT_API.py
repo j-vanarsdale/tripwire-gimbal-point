@@ -248,6 +248,7 @@ def gimbal_loop(args, fallback):
     live = 0
     hdop = 0
     cube_time = 0
+    temp = 0
     telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
     def cleanup(*_):
         print("Closing connection...")
@@ -271,6 +272,7 @@ def gimbal_loop(args, fallback):
             msg = master.messages['GLOBAL_POSITION_INT']
             gmsg = master.messages['GIMBAL_DEVICE_ATTITUDE_STATUS']
             pmsg = master.messages['GPS_RAW_INT']
+            tmsg = master.messages['SCALED_PRESSURE']
             
 
         except Exception:
@@ -295,7 +297,9 @@ def gimbal_loop(args, fallback):
         if pmsg:
             hdop = pmsg.eph
             cube_time = pmsg.time_usec
-            
+        if tmsg:
+            temp = tmsg.temperature
+
 
         # ---- Smoothing ----
         if last_raw is None:
@@ -353,7 +357,8 @@ def gimbal_loop(args, fallback):
             "pitch_meas": pitch_meas,
             "yaw_meas":   yaw_meas,
             "HDOP":       hdop,
-            "cube_time":  cube_time
+            "cube_time":  cube_time,
+            "Temperature": temp
         }
 
         with state_lock:
