@@ -246,6 +246,8 @@ def gimbal_loop(args, fallback):
     heading    = 0.0
     roll_meas  = pitch_meas = yaw_meas = 0.0
     live = 0
+    hdop = 0
+    cube_time = 0
     telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
     def cleanup(*_):
         print("Closing connection...")
@@ -268,6 +270,7 @@ def gimbal_loop(args, fallback):
                 continue
             msg = master.messages['GLOBAL_POSITION_INT']
             gmsg = master.messages['GIMBAL_DEVICE_ATTITUDE_STATUS']
+            pmsg = master.messages['GPS_RAW_INT']
             
 
         except Exception:
@@ -277,19 +280,22 @@ def gimbal_loop(args, fallback):
 
         live = 0  # assume fallback until proven otherwise
 
-        if msg:
-            if msg.lat != 0:
-                last_raw = (msg.lat / 1e7, msg.lon / 1e7, msg.alt / 1000)
-                fallback  = last_raw
-                live      = 1
-            else:
-                last_raw  = fallback
-            heading = msg.hdg / 100.0
+        if msg.lat != 0:
+            last_raw = (msg.lat / 1e7, msg.lon / 1e7, msg.alt / 1000)
+            fallback  = last_raw
+            live      = 1
+        else:
+            last_raw  = fallback
+        heading = msg.hdg / 100.0
 
-        if gmsg:
-            roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(
-                gmsg.q[0], gmsg.q[1], gmsg.q[2], gmsg.q[3]
-            )
+        roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(
+            gmsg.q[0], gmsg.q[1], gmsg.q[2], gmsg.q[3]
+        )
+
+        if pmsg:
+            hdop = pmsg.eph
+            cube_time = pmsg.time_usec
+            
 
         # ---- Smoothing ----
         if last_raw is None:
@@ -346,6 +352,8 @@ def gimbal_loop(args, fallback):
             "roll_meas":  roll_meas,
             "pitch_meas": pitch_meas,
             "yaw_meas":   yaw_meas,
+            "HDOP":       hdop,
+            "cube_time":  cube_time
         }
 
         with state_lock:
