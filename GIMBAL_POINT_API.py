@@ -238,7 +238,6 @@ def get_telemetry():
 def gimbal_loop(args, fallback):
     global latest_payload
 
-    update_period = int((args.period * 1e6) / 2)
     alpha = args.smooth
 
     master   = connect_with_retry(args.port, args.baud)
@@ -259,47 +258,6 @@ def gimbal_loop(args, fallback):
     signal.signal(signal.SIGINT,  cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    # Request gimbal attitude telemetry
-    print("Initializing gimbal pose telemetry...\n")
-    message = master.mav.command_long_encode(
-        master.target_system, master.target_component,
-        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-        0,
-        mavutil.mavlink.MAVLINK_MSG_ID_GIMBAL_DEVICE_ATTITUDE_STATUS,
-        update_period, 0, 0, 0, 0, 0,
-    )
-    master.mav.send(message)
-
-    response = master.recv_match(type="COMMAND_ACK", blocking=True)
-    if (response
-            and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
-            and response.result  == mavutil.mavlink.MAV_RESULT_ACCEPTED):
-        print("Command accepted")
-    else:
-        print("Command failed or no ACK received")
-
-    # Request platform GPS telemetry
-    print("Initializing cube pose telemetry...\n")
-    message = master.mav.command_long_encode(
-        master.target_system, master.target_component,
-        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
-        0,
-        mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
-        update_period, 0, 0, 0, 0, 0,
-    )
-    master.mav.send(message)
-
-    response = master.recv_match(type="COMMAND_ACK", blocking=True)
-    if (response
-            and response.command == mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL
-            and response.result  == mavutil.mavlink.MAV_RESULT_ACCEPTED):
-        print("Command accepted")
-    else:
-        print("Command failed or no ACK received")
-
-    print("Running...\n")
-    init_run = True
-
     while True:
         # ---- GPS position ----
         try:
@@ -310,15 +268,8 @@ def gimbal_loop(args, fallback):
                 continue
             msg = master.messages['GLOBAL_POSITION_INT']
             gmsg = master.messages['GIMBAL_DEVICE_ATTITUDE_STATUS']
-            #msg = None
-            #if init_run:
-            #    msg = master.recv_match(type="GLOBAL_POSITION_INT", blocking=True)
+            
 
-            #while True:
-            #    m = master.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
-            #    if m is None:
-            #        break
-            #    msg = m
         except Exception:
             print("Lost connection. Reconnecting...")
             master = connect_with_retry(args.port, args.baud)
@@ -334,23 +285,6 @@ def gimbal_loop(args, fallback):
             else:
                 last_raw  = fallback
             heading = msg.hdg / 100.0
-
-        # ---- Gimbal attitude ----
-        #try:
-        #    gmsg = None
-
-        #     if init_run:
-        #         gmsg = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=True)
-
-        #     while True:
-        #         gm = master.recv_match(type="GIMBAL_DEVICE_ATTITUDE_STATUS", blocking=False)
-        #         if gm is None:
-        #             break
-        #         gmsg = gm
-        # except Exception:
-        #     print("Lost connection. Reconnecting...")
-        #     master = connect_with_retry(args.port, args.baud)
-        #     continue
 
         if gmsg:
             roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(
@@ -437,7 +371,6 @@ def gimbal_loop(args, fallback):
             continue
 
         time.sleep(args.period)
-        init_run = False
 
 
 # --------------------
