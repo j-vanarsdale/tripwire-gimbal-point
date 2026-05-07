@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import time, math, signal, sys, argparse, threading
+import time, math, signal, sys, argparse, threading, os
 from pymavlink import mavutil
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 
 # --------------------
@@ -240,6 +240,10 @@ def gimbal_loop(args, fallback):
 
     alpha = args.smooth
 
+    # ---- Telemetry JSONL file state ----
+    telemetry_file = None
+    last_rotation_time = time.time()
+
     master   = connect_with_retry(args.port, args.baud)
     last_raw = None
     smooth_pos = None
@@ -256,6 +260,8 @@ def gimbal_loop(args, fallback):
             master.close()
         except Exception:
             pass
+        if telemetry_file:
+            telemetry_file.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT,  cleanup)
@@ -364,6 +370,21 @@ def gimbal_loop(args, fallback):
         with state_lock:
             latest_payload = payload
 
+        # ---- Telemetry JSONL logging ----
+        if args.telemetry_dir:
+            now_t = time.time()
+            if telemetry_file is None:
+                os.makedirs(args.telemetry_dir, exist_ok=True)
+                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                filepath = os.path.join(args.telemetry_dir, f"{ts}_telemetry.jsonl")
+                telemetry_file = open(filepath, "a")
+                last_rotation_time = now_t
+            telemetry_file.write(json.dumps(payload) + "\n")
+            telemetry_file.flush()
+            if now_t - last_rotation_time >= args.telemetry_interval:
+                telemetry_file.close()
+                telemetry_file = None
+
         # ---- Gimbal control ----
         try:
             master.mav.command_long_send(
@@ -402,6 +423,10 @@ def main():
                         help="Smoothing factor: 1=fast, 0.5=smooth, 0=hold value")
     parser.add_argument("--api_port",     type=int,   default=DEFAULT_API_PORT,
                         help="Flask API port (default: 5001)")
+    parser.add_argument("--telemetry_dir",    type=str,   default=None,
+                        help="Directory to store telemetry JSONL files (disabled if not set)")
+    parser.add_argument("--telemetry_interval", type=float, default=60.0,
+                        help="Interval in seconds between telemetry file rotations (default: 60)")
     args = parser.parse_args()
 
     # Resolve fallback
