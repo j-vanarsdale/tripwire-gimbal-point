@@ -47,7 +47,6 @@ FIELD_MAP = {
 MAX_EXTRAPOLATION_S = 20.0
 LEAD_TIME_S = 1.0
 INTERVAL = 0.5
-LOG_DIR = "logs"
 
 def _parse_field(value: str):
     """Strip whitespace and return None for empty strings, else best-fit type."""
@@ -464,66 +463,25 @@ class KalmanTracker:
 # ------------------------------------------------------------------
 
 if __name__ == "__main__":
+
     ADSB_ADDR   = "192.168.137.140"
     ADSB_PORT   = 30003
-    PRUNE_AFTER = 60
     LAT = -33.7615257
     LON = 150.7431018
 
-    tracks = TrackList(ADSB_ADDR, ADSB_PORT, prune_after=PRUNE_AFTER)
+    tracks = TrackList(ADSB_ADDR, ADSB_PORT, prune_after=60)
     tracks.start()
-    time.sleep(2) # wait for ingest
-
-    locked_icao = None
-    log_file = None
+    print("Populating tracks...")
+    time.sleep(3)
 
     try:
         while True:
-            t_loop_start = time.time()
-
-            if locked_icao is None or locked_icao not in tracks:
-                t = closest_track(tracks, LAT, LON)
-                if t is None:
-                    time.sleep(INTERVAL)
-                    continue
-                locked_icao = t.icao
-                tracker = KalmanTracker(tracks.get(locked_icao))
-                print(f"Locked: {locked_icao}")
-
-            tracker.step()
-
-            track = tracks.get(locked_icao)
-            pos   = tracker.get()
-
-            if pos and track:
-                s_lat, s_lon, s_alt, s_t = pos
-                record = {
-                    "t":          time.time(),
-                    "icao":       track.icao,
-                    "callsign":   track.callsign,
-                    "age":        round(track.age(), 2),
-                    "raw_lat":    track.lat,
-                    "raw_lon":    track.lon,
-                    "raw_alt":    track.altitude,
-                    "smooth_lat": s_lat,
-                    "smooth_lon": s_lon,
-                    "smooth_alt": s_alt,
-                }
-
-                if log_file is None:
-                    os.makedirs(LOG_DIR, exist_ok=True)
-                    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                    log_file = open(os.path.join(LOG_DIR, f"{ts}_track.jsonl"), "a")
-
-                log_file.write(json.dumps(record) + "\n")
-                log_file.flush()
-
-                print(f"  {track.icao} lat={s_lat:.5f} lon={s_lon:.5f} alt={s_alt:.1f}ft")
-
-            elapsed = time.time() - t_loop_start
-            time.sleep(max(0.0, INTERVAL - elapsed))
+            track = closest_track(tracks, LAT, LON)
+            if track:
+                print(track)
+            else:
+                print("No tracks.")
+            time.sleep(1)
 
     except KeyboardInterrupt:
-        if log_file:
-            log_file.close()
         tracks.stop()
