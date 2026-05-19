@@ -31,8 +31,6 @@ FRAME_FLAG_EARTH   = 16   # pantilt["frame"] == False → earth frame
 ADSB_ADDR   = "192.168.137.140"
 ADSB_PORT   = 30003
 PRUNE_AFTER = 60
-LAT = -33.7615257
-LON = 150.7431018
 
 app = Flask(__name__)
 
@@ -276,6 +274,8 @@ def gimbal_loop(args, fallback, tracks=None):
             master.close()
         except Exception:
             pass
+        if tracks is not None:
+            tracks.stop()
         if telemetry_file:
             telemetry_file.close()
         if adsb_log_file:              # add this
