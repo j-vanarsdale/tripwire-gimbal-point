@@ -4,6 +4,7 @@ from pymavlink import mavutil
 import json
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
+import subprocess
 
 # --------------------
 # DEFAULT CONSTANTS
@@ -102,6 +103,12 @@ def connect_with_retry(port, baud):
             print("Connection failed. Retrying in 2 seconds...")
             time.sleep(2)
 
+def get_temp():
+    try:
+        temp_raw = subprocess.check_output(["vcgencmd", "measure_temp"]).decode()
+        return float(temp_raw.split('=')[1].split("'")[0])
+    except Exception:
+        return None
 
 # --------------------
 # FLASK ROUTES
@@ -304,7 +311,7 @@ def gimbal_loop(args, fallback):
             hdop = pmsg.eph
             cube_time = pmsg.time_usec
         if tmsg:
-            temp = tmsg.temperature
+            temp = tmsg.temperature / 100.0
 
 
         # ---- Smoothing ----
@@ -364,7 +371,8 @@ def gimbal_loop(args, fallback):
             "yaw_meas":   yaw_meas,
             "HDOP":       hdop,
             "cube_time":  cube_time,
-            "Temperature": temp
+            "cube_temp": temp,
+            "pi_temp": get_temp()
         }
 
         with state_lock:
