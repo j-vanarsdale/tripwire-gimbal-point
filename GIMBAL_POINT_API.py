@@ -28,7 +28,7 @@ DEFAULT_API_PORT    = 5001
 FRAME_FLAG_VEHICLE = 0   # pantilt["frame"] == True  → vehicle/body frame
 FRAME_FLAG_EARTH   = 16   # pantilt["frame"] == False → earth frame
 
-ADSB_ADDR   = "192.168.137.140"
+ADSB_ADDR   = "192.168.40.106"
 ADSB_PORT   = 30003
 PRUNE_AFTER = 60
 
@@ -481,7 +481,7 @@ def main():
                         help="Interval in seconds between telemetry file rotations (default: 60)")
     parser.add_argument("--adsb_host",   type=str, default=ADSB_ADDR)
     parser.add_argument("--adsb_port",   type=int, default=ADSB_PORT)
-    parser.add_argument("--adsb_enable", action="store_true", default=False,
+    parser.add_argument("--adsb_enable", action="store_true", default=True,
                         help="Enable ADS-B tracking mode")
     args = parser.parse_args()
 
