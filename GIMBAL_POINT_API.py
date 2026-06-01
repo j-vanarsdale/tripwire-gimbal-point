@@ -266,9 +266,11 @@ def gimbal_loop(args, fallback, tracks=None):
     cube_time = 0
     temp = 0
     telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
-    adsb_log_file = None
     dr_tracker = None
     dr_tracked_icao = None
+    track  = None
+    pos    = None
+    dr_lat = dr_lon = dr_alt = None
 
     def cleanup(*_):
         print("Closing connection...")
@@ -280,8 +282,6 @@ def gimbal_loop(args, fallback, tracks=None):
             tracks.stop()
         if telemetry_file:
             telemetry_file.close()
-        if adsb_log_file:              # add this
-            adsb_log_file.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT,  cleanup)
@@ -365,29 +365,6 @@ def gimbal_loop(args, fallback, tracks=None):
                         target["alt"] = dr_alt * 0.3048   # ft → metres
                         targeting_active = True
 
-                    # ADS-B log
-                    if args.telemetry_dir:
-                        record = {
-                            "t":          time.time(),
-                            "icao":       track.icao,
-                            "callsign":   track.callsign,
-                            "age":        round(track.age(), 2),
-                            "raw_lat":    track.lat,
-                            "raw_lon":    track.lon,
-                            "raw_alt":    track.altitude,
-                            "dr_lat":   dr_lat,
-                            "dr_lon":   dr_lon,
-                            "dr_alt":   dr_alt,
-                        }
-                        if adsb_log_file is None:
-                            os.makedirs(args.telemetry_dir, exist_ok=True)    # add this
-                            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                            adsb_log_file = open(
-                                os.path.join(args.telemetry_dir, f"{ts}_adsb.jsonl"), "a"
-                            )
-                        adsb_log_file.write(json.dumps(record) + "\n")
-                        adsb_log_file.flush()
-
         # ---- Targeting mode: recompute pan/tilt from lat/lon every tick ----
         # This runs inside the loop so angles stay correct as the vehicle moves.
         # Targeting is always earth frame; frame flag is forced accordingly.
@@ -432,7 +409,20 @@ def gimbal_loop(args, fallback, tracks=None):
             "HDOP":       hdop,
             "cube_time":  cube_time,
             "cube_temp": temp,
-            "pi_temp": get_temp()
+            "pi_temp": get_temp(),
+            # ---- ADS-B fields (None when not tracking) ----
+            "adsb_icao":      track.icao          if track else None,
+            "adsb_callsign":  track.callsign      if track else None,
+            "adsb_age":       round(track.age(), 2) if track else None,
+            "adsb_raw_lat":   track.lat           if track else None,
+            "adsb_raw_lon":   track.lon           if track else None,
+            "adsb_raw_alt":   track.altitude      if track else None,
+            "adsb_dr_lat":    dr_lat              if pos else None,
+            "adsb_dr_lon":    dr_lon              if pos else None,
+            "adsb_dr_alt":    dr_alt              if pos else None,
+            "adsb_speed":     track.speed         if track else None,
+            "adsb_track":     track.track         if track else None,
+            "adsb_vrate":     track.vertical_rate if track else None,
         }
 
         with state_lock:
