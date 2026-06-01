@@ -398,7 +398,7 @@ def gimbal_loop(args, fallback, tracks=None):
                 tgt_alt = target["alt"]
 
                 pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
-                pantilt["pan"]   = (yaw_calc   + args.yaw_offset   + 180) % 360 - 180
+                pantilt["pan"]   = max(-178.0, min(178.0, (yaw_calc + args.yaw_offset + 180) % 360 - 180))
                 pantilt["tilt"]  = (pitch_calc + args.pitch_offset  + 180) % 360 - 180
                 pantilt["frame"] = False   # targeting is always earth frame
 
