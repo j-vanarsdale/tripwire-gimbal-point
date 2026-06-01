@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 import subprocess
-from adsb import TrackList, closest_track
+from adsb import TrackList, closest_track, DeadReckonTracker
 
 # --------------------
 # DEFAULT CONSTANTS
@@ -266,7 +266,9 @@ def gimbal_loop(args, fallback, tracks=None):
     cube_time = 0
     temp = 0
     telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
-    adsb_log_file = None 
+    adsb_log_file = None
+    dr_tracker = None
+    dr_tracked_icao = None
 
     def cleanup(*_):
         print("Closing connection...")
@@ -346,31 +348,45 @@ def gimbal_loop(args, fallback, tracks=None):
             track = closest_track(tracks, lat, lon)
             
             if track is not None and track.has_position() and track.altitude is not None:
-                with state_lock:
-                    target["lat"] = track.lat
-                    target["lon"] = track.lon
-                    target["alt"] = track.altitude * 0.3048   # ft → metres
-                    targeting_active = True
 
-                # ADS-B log
-                if args.telemetry_dir:
-                    record = {
-                        "t":          time.time(),
-                        "icao":       track.icao,
-                        "callsign":   track.callsign,
-                        "age":        round(track.age(), 2),
-                        "raw_lat":    track.lat,
-                        "raw_lon":    track.lon,
-                        "raw_alt":    track.altitude,
-                    }
-                    if adsb_log_file is None:
-                        os.makedirs(args.telemetry_dir, exist_ok=True)    # add this
-                        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                        adsb_log_file = open(
-                            os.path.join(args.telemetry_dir, f"{ts}_adsb.jsonl"), "a"
-                        )
-                    adsb_log_file.write(json.dumps(record) + "\n")
-                    adsb_log_file.flush()
+                # Reset tracker if we've locked onto a different aircraft
+                if track.icao != dr_tracked_icao:
+                    dr_tracker      = DeadReckonTracker(track)
+                    dr_tracked_icao = track.icao
+                    print(f"[ADS-B] Tracking {track.icao} ({track.callsign})")
+
+                dr_tracker.step()
+                pos = dr_tracker.get()
+                if pos:
+                    dr_lat, dr_lon, dr_alt = pos
+                    with state_lock:
+                        target["lat"] = dr_lat
+                        target["lon"] = dr_lon
+                        target["alt"] = dr_alt * 0.3048   # ft → metres
+                        targeting_active = True
+
+                    # ADS-B log
+                    if args.telemetry_dir:
+                        record = {
+                            "t":          time.time(),
+                            "icao":       track.icao,
+                            "callsign":   track.callsign,
+                            "age":        round(track.age(), 2),
+                            "raw_lat":    track.lat,
+                            "raw_lon":    track.lon,
+                            "raw_alt":    track.altitude,
+                            "dr_lat":   dr_lat,
+                            "dr_lon":   dr_lon,
+                            "dr_alt":   dr_alt,
+                        }
+                        if adsb_log_file is None:
+                            os.makedirs(args.telemetry_dir, exist_ok=True)    # add this
+                            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                            adsb_log_file = open(
+                                os.path.join(args.telemetry_dir, f"{ts}_adsb.jsonl"), "a"
+                            )
+                        adsb_log_file.write(json.dumps(record) + "\n")
+                        adsb_log_file.flush()
 
         # ---- Targeting mode: recompute pan/tilt from lat/lon every tick ----
         # This runs inside the loop so angles stay correct as the vehicle moves.

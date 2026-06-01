@@ -5,6 +5,7 @@ from threading import Thread, Lock
 import numpy as np
 import json
 from datetime import datetime, timezone
+import math
 # SBS-1 BaseStation CSV field indices
 #  0: MSG type prefix ("MSG")
 #  1: Transmission type (1-8)
@@ -191,6 +192,22 @@ def _kf_update(x, P, lat_meas, lon_meas, alt_ft_meas):
     I = np.eye(P.shape[0])
     P = (I - K @ H) @ P
     return x, P
+
+def deadreckon(lat, lon, speed_kts, track_deg, dt):
+    """
+    Extrapolate position forward by dt seconds using speed and heading.
+    Returns (lat, lon).
+    """
+    if speed_kts is None or track_deg is None or dt <= 0:
+        return lat, lon
+
+    dist_m    = speed_kts * 0.514444 * dt   # knots → m/s → metres
+    track_rad = math.radians(track_deg)
+
+    dlat = (dist_m * math.cos(track_rad)) / 111_000
+    dlon = (dist_m * math.sin(track_rad)) / (111_000 * math.cos(math.radians(lat)))
+
+    return lat + dlat, lon + dlon
 
 class Track:
     """Represents a single aircraft track."""
@@ -392,6 +409,86 @@ class TrackList(Thread):
             f" tracks={len(self)}"
             f" prune_after={self.prune_after}s)"
         )
+
+class DeadReckonTracker:
+    def __init__(self, track: Track, lead_s: float = LEAD_TIME_S,
+                 max_extrap_s: float = MAX_EXTRAPOLATION_S):
+        self._track       = track
+        self._lead_s      = lead_s
+        self._max_extrap  = max_extrap_s
+
+        # Snapshot of last known good position fix
+        self._ref_lat     = None
+        self._ref_lon     = None
+        self._ref_alt     = None
+        self._ref_t       = None
+        self._last_seen   = None
+
+        self.smooth_lat   = None
+        self.smooth_lon   = None
+        self.smooth_alt   = None
+
+    def get(self):
+        if self.smooth_lat is None:
+            return None
+        return (self.smooth_lat, self.smooth_lon, self.smooth_alt)
+
+    def step(self):
+        track     = self._track
+        t_now     = time.time()
+
+        lat       = track.lat
+        lon       = track.lon
+        alt       = track.altitude
+        last_seen = track.last_pos_seen   # uses the position-specific timestamp
+
+        has_pos = (lat is not None and lon is not None
+                   and alt is not None and last_seen is not None)
+
+        # ── Initialise on first fix ──────────────────────────────────────────
+        if self._ref_lat is None:
+            if not has_pos:
+                return
+            self._ref_lat   = lat
+            self._ref_lon   = lon
+            self._ref_alt   = alt
+            self._ref_t     = last_seen
+            self._last_seen = last_seen
+            self.smooth_lat = lat
+            self.smooth_lon = lon
+            self.smooth_alt = alt
+            return
+
+        # ── New position fix arrived — update reference point ────────────────
+        if has_pos and last_seen != self._last_seen:
+            self._ref_lat   = lat
+            self._ref_lon   = lon
+            self._ref_alt   = alt
+            self._ref_t     = last_seen
+            self._last_seen = last_seen
+
+        # ── Dead reckon from reference point to now + lead ───────────────────
+        if self._ref_t is None:
+            return
+
+        dt = min(t_now - self._ref_t, self._max_extrap)
+        total_dt = dt + self._lead_s
+
+        dr_lat, dr_lon = deadreckon(
+            self._ref_lat, self._ref_lon,
+            track.speed, track.track,
+            total_dt,
+        )
+
+        # Altitude — simple linear extrapolation using vertical rate
+        if track.vertical_rate is not None:
+            alt_extrap = self._ref_alt + (track.vertical_rate / 60.0) * total_dt
+        else:
+            alt_extrap = self._ref_alt
+
+        self.smooth_lat = dr_lat
+        self.smooth_lon = dr_lon
+        self.smooth_alt = alt_extrap
 
 class KalmanTracker:
     def __init__(self, track: Track, lead_s: float = LEAD_TIME_S,
