@@ -29,6 +29,29 @@ FRAME_FLAG_EARTH   = 16   # pantilt["frame"] == False → earth frame
 
 app = Flask(__name__)
 
+# ── CORS — allow the frontend server (any origin) to call the API ─────────────
+# The dashboard HTML is now served from a separate host, so the browser will
+# make cross-origin requests to this server.  We allow all origins here because
+# the frontend host/port is not known at deploy time.  If you want to restrict
+# this, set ALLOWED_ORIGIN in the environment or hardcode it below.
+_ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
+
+@app.after_request
+def add_cors(response):
+    response.headers["Access-Control-Allow-Origin"]  = _ALLOWED_ORIGIN
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
+@app.route("/", defaults={"path": ""}, methods=["OPTIONS"])
+@app.route("/<path:path>",             methods=["OPTIONS"])
+def cors_preflight(path=""):
+    resp = app.make_default_options_response()
+    resp.headers["Access-Control-Allow-Origin"]  = _ALLOWED_ORIGIN
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return resp
+
 # --------------------
 # SHARED STATE
 # Protected by state_lock
