@@ -66,6 +66,7 @@ latest_payload = {}
 targeting_active = False
 
 adsb_target_icao = None   # set via API, None = not tracking
+tracks = None
 # --------------------
 
 
@@ -246,12 +247,92 @@ def get_telemetry():
 
     return jsonify(payload), 200
 
+@app.route("/adsb/tracks", methods=["GET"])
+def get_adsb_tracks():
+    """
+    Return all currently visible aircraft as a list sorted by distance
+    from the current vehicle position.
+    """
+    if tracks is None:
+        return jsonify({"error": "ADS-B not ready"}), 503
+    
+    snapshot = tracks.get_all()
 
+    with state_lock:
+        obs_lat = latest_payload.get("lat")
+        obs_lon = latest_payload.get("lon")
+
+    def _haversine(lat1, lon1, lat2, lon2):
+        R = 6371000.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi    = math.radians(lat2 - lat1)
+        dlambda = math.radians(lon2 - lon1)
+        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+    result = []
+    for icao, t in snapshot.items():
+        if not t.has_position() or t.altitude is None:
+            continue
+        dist = None
+        if obs_lat and obs_lon:
+            dist = round(_haversine(obs_lat, obs_lon, t.lat, t.lon))
+        result.append({
+            "icao":       t.icao,
+            "callsign":   t.callsign,
+            "lat":        t.lat,
+            "lon":        t.lon,
+            "alt_ft":     t.altitude,
+            "speed":      t.speed,
+            "track":      t.track,
+            "age":        round(t.age(), 1),
+            "distance_m": dist,
+        })
+
+    result.sort(key=lambda x: x["distance_m"] if x["distance_m"] is not None else float("inf"))
+    return jsonify(result), 200
+
+
+@app.route("/adsb/track", methods=["PUT"])
+def put_adsb_track():
+    """
+    Lock onto a specific aircraft by ICAO.
+    Switches mode to 'adsb', clears any existing targeting or rc mode.
+
+    Body: {"icao": "7C1234"}
+    """
+    global adsb_target_icao, targeting_active
+    data = request.get_json(force=True, silent=True)
+    if not data or "icao" not in data:
+        return jsonify({"error": "Missing field: icao"}), 400
+
+    icao = data["icao"].strip().upper()
+
+    if tracks is None:
+        return jsonify({"error": "ADS-B not ready"}), 503
+
+    if icao not in tracks:
+        return jsonify({"error": f"ICAO {icao} not currently visible"}), 404
+
+    with state_lock:
+        adsb_target_icao = icao
+        targeting_active = False
+
+    return jsonify({"status": "ok", "mode": "adsb", "icao": icao}), 200
+
+@app.route("/adsb/track", methods=["DELETE"])
+def delete_adsb_track():
+    """Stop ADS-B tracking and return to rc mode."""
+    global adsb_target_icao, targeting_active
+    with state_lock:
+        adsb_target_icao = None
+        targeting_active = False
+    return jsonify({"status": "ok", "mode": "rc"}), 200
 # --------------------
 # GIMBAL LOOP
 # --------------------
 
-def gimbal_loop(args, fallback, tracks=None):
+def gimbal_loop(args, fallback):
     global latest_payload
 
     alpha = args.smooth
@@ -482,6 +563,8 @@ def gimbal_loop(args, fallback, tracks=None):
 # --------------------
 
 def main():
+    global tracks
+
     parser = argparse.ArgumentParser(description="Gimbal pointer with REST API")
     parser.add_argument("--port",         default=DEFAULT_PORT)
     parser.add_argument("--baud",         type=int,   default=DEFAULT_BAUD)
@@ -523,7 +606,7 @@ def main():
     time.sleep(2)   # let it populate
 
     # Run gimbal loop on the main thread
-    gimbal_loop(args, fallback, tracks)
+    gimbal_loop(args, fallback)
 
 
 if __name__ == "__main__":
