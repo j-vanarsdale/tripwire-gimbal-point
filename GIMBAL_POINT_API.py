@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
 import subprocess
-from adsb import TrackList, closest_track, DeadReckonTracker
+from adsb import TrackList, DeadReckonTracker
 
 # --------------------
 # DEFAULT CONSTANTS
@@ -64,6 +64,8 @@ latest_payload = {}
 # Mode flag — True = target lat/lon/alt tracking mode (loop recomputes angles every tick)
 #              False = RC mode (loop uses pantilt values as-is)
 targeting_active = False
+
+adsb_target_icao = None   # set via API, None = not tracking
 # --------------------
 
 
@@ -136,7 +138,7 @@ def put_target():
 
     Returns the updated target.
     """
-    global targeting_active
+    global adsb_target_icao, targeting_active
     data = request.get_json(force=True, silent=True)
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
@@ -155,6 +157,7 @@ def put_target():
                     return jsonify({"error": f"Field '{key}' must be a number"}), 400
 
         targeting_active = True
+        adsb_target_icao = None
         updated_target = dict(target)
 
     return jsonify({
@@ -189,7 +192,7 @@ def put_pantilt():
 
     Returns the updated pantilt state.
     """
-    global targeting_active
+    global adsb_target_icao, targeting_active
     data = request.get_json(force=True, silent=True)
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
@@ -218,6 +221,7 @@ def put_pantilt():
             pantilt["frame"] = data["frame"]
 
         targeting_active = False
+        adsb_target_icao = None
         updated = dict(pantilt)
 
     return jsonify({"status": "ok", "pantilt": updated, "mode": "rc"}), 200
@@ -342,28 +346,30 @@ def gimbal_loop(args, fallback, tracks=None):
         lat, lon, alt = smooth_pos
 
         # ---- ADS-B tracking mode ----
-        # Runs independently of targeting_active — updates the target
-        # dict which the existing targeting block then uses as normal
         if tracks is not None:
-            track = closest_track(tracks, lat, lon)
-            
-            if track is not None and track.has_position() and track.altitude is not None:
+            with state_lock:
+                icao_to_track = adsb_target_icao
 
-                # Reset tracker if we've locked onto a different aircraft
-                if track.icao != dr_tracked_icao:
-                    dr_tracker      = DeadReckonTracker(track)
-                    dr_tracked_icao = track.icao
-                    print(f"[ADS-B] Tracking {track.icao} ({track.callsign})")
+            if icao_to_track is not None:
+                track = tracks.get(icao_to_track)
 
-                dr_tracker.step()
-                pos = dr_tracker.get()
-                if pos:
-                    dr_lat, dr_lon, dr_alt = pos
-                    with state_lock:
-                        target["lat"] = dr_lat
-                        target["lon"] = dr_lon
-                        target["alt"] = dr_alt * 0.3048   # ft → metres
-                        targeting_active = True
+                if track is not None and track.has_position() and track.altitude is not None:
+
+                    # Reset tracker if locked ICAO changed
+                    if track.icao != dr_tracked_icao:
+                        dr_tracker      = DeadReckonTracker(track)
+                        dr_tracked_icao = track.icao
+                        print(f"[ADS-B] Tracking {track.icao} ({track.callsign})")
+
+                    dr_tracker.step()
+                    pos = dr_tracker.get()
+                    if pos:
+                        dr_lat, dr_lon, dr_alt = pos
+                        with state_lock:
+                            target["lat"] = dr_lat
+                            target["lon"] = dr_lon
+                            target["alt"] = dr_alt * 0.3048
+                            targeting_active = True
 
         # ---- Targeting mode: recompute pan/tilt from lat/lon every tick ----
         # This runs inside the loop so angles stay correct as the vehicle moves.
@@ -382,7 +388,13 @@ def gimbal_loop(args, fallback, tracks=None):
             pan_out           = pantilt["pan"]
             tilt_out          = pantilt["tilt"]
             use_vehicle_frame = pantilt["frame"]
-            mode              = "targeting" if targeting_active else "rc"
+            # Mode string — adsb takes priority over generic targeting
+            if adsb_target_icao is not None:
+                mode = "adsb"
+            elif targeting_active:
+                mode = "targeting"
+            else:
+                mode = "rc"
 
         frame_flag = FRAME_FLAG_VEHICLE if use_vehicle_frame else FRAME_FLAG_EARTH
 
@@ -487,8 +499,6 @@ def main():
                         help="Interval in seconds between telemetry file rotations (default: 60)")
     parser.add_argument("--adsb_host",   type=str, default=ADSB_ADDR)
     parser.add_argument("--adsb_port",   type=int, default=ADSB_PORT)
-    parser.add_argument("--adsb_enable", action="store_true", default=True,
-                        help="Enable ADS-B tracking mode")
     args = parser.parse_args()
 
     # Resolve fallback
@@ -506,13 +516,11 @@ def main():
     flask_thread.start()
     print(f"REST API listening on port {args.api_port}")
 
-    # Start ADS-B thread if enabled
-    tracks = None
-    if args.adsb_enable:
-        tracks = TrackList(args.adsb_host, args.adsb_port, prune_after=PRUNE_AFTER)
-        tracks.start()
-        print(f"ADS-B tracking enabled, connecting to {args.adsb_host}:{args.adsb_port}")
-        time.sleep(2)   # let it populate
+    # Start ADS-B thread
+    tracks = TrackList(args.adsb_host, args.adsb_port, prune_after=PRUNE_AFTER)
+    tracks.start()
+    print(f"ADS-B tracking enabled, connecting to {args.adsb_host}:{args.adsb_port}")
+    time.sleep(2)   # let it populate
 
     # Run gimbal loop on the main thread
     gimbal_loop(args, fallback, tracks)
