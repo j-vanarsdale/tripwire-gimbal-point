@@ -1,9 +1,7 @@
 ## API Script
-Currently the script auto turns on ads-b targetting through args and can't be changed.
+Has 3 modes: targetting, RC, adsb.
 
 Things to do:
-- Change from closest aircraft track to manual targetting track
-- Add way to stop and start ads-b tracking
 - Possibly: switch between kalman and dead reckoning? and manual? (frontend)
 - Even more possibly: add adjustable update rate (frontend)
 - Even more possibly: add adjustable self position smoothing (frontend)
