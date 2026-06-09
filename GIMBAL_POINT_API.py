@@ -356,7 +356,7 @@ def delete_adsb_track():
 # --------------------
 
 def gimbal_loop(args, fallback):
-    global latest_payload
+    global latest_payload, targeting_active
 
     alpha = args.smooth
 
