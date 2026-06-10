@@ -11,7 +11,7 @@ from adsb import TrackList, DeadReckonTracker
 # DEFAULT CONSTANTS
 # (set via argparse)
 # --------------------
-DEFAULT_PORT        = "/dev/ttyAMA0"
+DEFAULT_PORT        = "udp:127.0.0.1:14550"
 DEFAULT_BAUD        = 115200
 DEFAULT_FALLBACK    = (-33.76535, 150.74087, 0.0)   # lat, lon, alt
 DEFAULT_YAW_OFFSET  = 0.0
@@ -125,8 +125,12 @@ def quaternion_to_euler(w, x, y, z):
 def connect_with_retry(port, baud):
     while True:
         try:
-            print(f"Connecting to {port} @ {baud}...")
-            master = mavutil.mavlink_connection(port, baud=baud)
+            if port.startswith("udp"):
+                print(f"Connecting to UDP {port}...")
+                master = mavutil.mavlink_connection(port)
+            else:
+                print(f"Connecting to {port} @ {baud}...")
+                master = mavutil.mavlink_connection(port, baud=baud)
             master.wait_heartbeat(timeout=5)
             print("Connected.")
             return master
@@ -589,8 +593,10 @@ def main():
     global tracks
 
     parser = argparse.ArgumentParser(description="Gimbal pointer with REST API")
-    parser.add_argument("--port",         default=DEFAULT_PORT)
-    parser.add_argument("--baud",         type=int,   default=DEFAULT_BAUD)
+    parser.add_argument("--port",         default=DEFAULT_PORT,
+                        help="MAVLink connection string (default: udp:127.0.0.1:14550)")
+    parser.add_argument("--baud",         type=int,   default=DEFAULT_BAUD,
+                        help="Serial baud rate (ignored for UDP connections)")
     parser.add_argument("--fallback",     type=str,   help="lat,lon,alt")
     parser.add_argument("--yaw_offset",   type=float, default=DEFAULT_YAW_OFFSET)
     parser.add_argument("--pitch_offset", type=float, default=DEFAULT_PITCH_OFFSET)
