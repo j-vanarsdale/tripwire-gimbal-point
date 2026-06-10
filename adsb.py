@@ -319,24 +319,30 @@ class TrackList(Thread):
         asyncio.run(self._receive_loop())
 
     async def _receive_loop(self):
-        try:
-            reader, _ = await telnetlib3.open_connection(self._ip, self._port)
-        except Exception as e:
-            print(f"[TrackList] Connection failed: {e}")
-            return
+        while not self._stop_event:
+            try:
+                reader, _ = await telnetlib3.open_connection(self._ip, self._port)
+            except Exception as e:
+                print(f"[TrackList] Connection failed: {e}, retrying in 2 s...")
+                await asyncio.sleep(2)
+                continue
 
-        print(f"[TrackList] Connected to {self._ip}:{self._port}")
-        try:
-            while not self._stop_event:
-                line = await reader.readline()
-                if line:
-                    if isinstance(line, bytes):
-                        line = line.decode("utf-8", errors="replace")
-                    self._ingest(line)
-        except Exception as e:
-            print(f"[TrackList] Stream error: {e}")
-        finally:
-            print("[TrackList] Disconnected.")
+            print(f"[TrackList] Connected to {self._ip}:{self._port}")
+            try:
+                while not self._stop_event:
+                    line = await reader.readline()
+                    if line:
+                        if isinstance(line, bytes):
+                            line = line.decode("utf-8", errors="replace")
+                        self._ingest(line)
+            except Exception as e:
+                print(f"[TrackList] Stream error: {e}")
+            finally:
+                print("[TrackList] Disconnected.")
+
+            if not self._stop_event:
+                print("[TrackList] Reconnecting in 2 s...")
+                await asyncio.sleep(2)
 
     # ------------------------------------------------------------------
     # Internal ingest (called from within the thread)
