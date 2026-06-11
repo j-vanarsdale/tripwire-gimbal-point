@@ -434,6 +434,9 @@ class DeadReckonTracker:
         self.smooth_lon   = None
         self.smooth_alt   = None
 
+    def set_lead_time(self, seconds: float):
+        self._lead_s = seconds
+
     def get(self):
         if self.smooth_lat is None:
             return None
@@ -512,6 +515,9 @@ class KalmanTracker:
         self.smooth_lon = None
         self.smooth_alt = None
         self.smooth_t   = None
+
+    def set_lead_time(self, seconds: float):
+        self._lead_s = seconds
 
     def get(self):
         if self.smooth_lat is None:
