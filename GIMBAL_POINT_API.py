@@ -87,9 +87,10 @@ latest_payload = {}
 # Mode flag — True = target lat/lon/alt tracking mode (loop recomputes angles every tick)
 #              False = RC mode (loop uses pantilt values as-is)
 targeting_active = False
-
+desired_lead_time_s = 1.0
 adsb_target_icao = None   # set via API, None = not tracking
 tracks = None
+dr_tracker = None 
 # --------------------
 
 
@@ -355,12 +356,36 @@ def delete_adsb_track():
         adsb_target_icao = None
         targeting_active = False
     return jsonify({"status": "ok", "mode": "rc"}), 200
+
+@app.route("/adsb/lead_time", methods=["PUT"])
+def put_lead_time():
+    global desired_lead_time_s, dr_tracker
+    data = request.get_json(force=True, silent=True)
+    if not data or "lead_time_s" not in data:
+        return jsonify({"error": "Missing field: lead_time_s"}), 400
+
+    try:
+        value = float(data["lead_time_s"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "lead_time_s must be a number"}), 400
+
+    with state_lock:
+        desired_lead_time_s = value
+        if dr_tracker is not None:
+            dr_tracker.set_lead_time(value)
+
+    return jsonify({"status": "ok", "lead_time_s": value}), 200
+
+
+@app.route("/adsb/lead_time", methods=["GET"])
+def get_lead_time():
+    return jsonify({"lead_time_s": desired_lead_time_s}), 200
 # --------------------
 # GIMBAL LOOP
 # --------------------
 
 def gimbal_loop(args, fallback):
-    global latest_payload, targeting_active
+    global latest_payload, targeting_active, dr_tracker
 
     alpha = args.smooth
 
@@ -465,7 +490,7 @@ def gimbal_loop(args, fallback):
 
                     # Reset tracker if locked ICAO changed
                     if track.icao != dr_tracked_icao:
-                        dr_tracker      = DeadReckonTracker(track)
+                        dr_tracker      = DeadReckonTracker(track, lead_s=desired_lead_time_s)
                         dr_tracked_icao = track.icao
                         print(f"[ADS-B] Tracking {track.icao} ({track.callsign})")
 
