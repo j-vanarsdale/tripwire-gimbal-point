@@ -88,6 +88,7 @@ latest_payload = {}
 #              False = RC mode (loop uses pantilt values as-is)
 targeting_active = False
 desired_lead_time_s = 1.0
+desired_alt_offset_m = 0.0
 adsb_target_icao = None   # set via API, None = not tracking
 tracks = None
 dr_tracker = None 
@@ -379,7 +380,33 @@ def put_lead_time():
 
 @app.route("/adsb/lead_time", methods=["GET"])
 def get_lead_time():
-    return jsonify({"lead_time_s": desired_lead_time_s}), 200
+    with state_lock:
+        value = desired_lead_time_s
+    return jsonify({"lead_time_s": value}), 200
+
+@app.route("/adsb/alt_offset", methods=["PUT"])
+def put_alt_offset():
+    global desired_alt_offset_m
+    data = request.get_json(force=True, silent=True)
+    if not data or "alt_offset_m" not in data:
+        return jsonify({"error": "Missing field: alt_offset_m"}), 400
+
+    try:
+        value = float(data["alt_offset_m"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "alt_offset_m must be a number"}), 400
+
+    with state_lock:
+        desired_alt_offset_m = value
+
+    return jsonify({"status": "ok", "alt_offset_m": value}), 200
+
+
+@app.route("/adsb/alt_offset", methods=["GET"])
+def get_alt_offset():
+    with state_lock:
+        value = desired_alt_offset_m
+    return jsonify({"alt_offset_m": value}), 200
 # --------------------
 # GIMBAL LOOP
 # --------------------
@@ -403,7 +430,6 @@ def gimbal_loop(args, fallback):
     cube_time = 0
     temp = 0
     telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
-    dr_tracker = None
     dr_tracked_icao = None
     track  = None
     pos    = None
@@ -501,7 +527,7 @@ def gimbal_loop(args, fallback):
                         with state_lock:
                             target["lat"] = dr_lat
                             target["lon"] = dr_lon
-                            target["alt"] = dr_alt * 0.3048
+                            target["alt"] = (dr_alt * 0.3048) + desired_alt_offset_m  
                             targeting_active = True
 
         # ---- Targeting mode: recompute pan/tilt from lat/lon every tick ----
