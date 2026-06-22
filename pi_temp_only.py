@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import time, math, signal, sys, argparse, threading, os, subprocess
 from flask import Flask, request, jsonify
+from datetime import datetime, timezone
+import json
 
 DEFAULT_API_PORT    = 5001
 
@@ -63,6 +65,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gimbal pointer with REST API")
     parser.add_argument("--api_port",     type=int,   default=DEFAULT_API_PORT,
                         help="Flask API port (default: 5001)")
+    parser.add_argument("--telemetry_dir",    type=str,   default=None,
+                        help="Directory to store telemetry JSONL files (disabled if not set)")
+    parser.add_argument("--telemetry_interval", type=float, default=60.0,
+                        help="Interval in seconds between telemetry file rotations (default: 60)")
     
     args = parser.parse_args()
 
@@ -75,6 +81,9 @@ if __name__ == "__main__":
     print(f"REST API listening on port {args.api_port}")
 
     while True:
+        # ---- Telemetry JSONL file state ----
+        telemetry_file = None
+        last_rotation_time = time.time()
 
         payload = {
                 "pi_temp": get_temp(),
@@ -82,5 +91,20 @@ if __name__ == "__main__":
 
         with state_lock:
             latest_payload = payload
+
+        # ---- Telemetry JSONL logging ----
+        if args.telemetry_dir:
+            now_t = time.time()
+            if telemetry_file is None:
+                os.makedirs(args.telemetry_dir, exist_ok=True)
+                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                filepath = os.path.join(args.telemetry_dir, f"{ts}_telemetry.jsonl")
+                telemetry_file = open(filepath, "a")
+                last_rotation_time = now_t
+            telemetry_file.write(json.dumps(payload) + "\n")
+            telemetry_file.flush()
+            if now_t - last_rotation_time >= args.telemetry_interval:
+                telemetry_file.close()
+                telemetry_file = None
 
         time.sleep(0.5)
