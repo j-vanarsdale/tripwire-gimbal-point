@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
         payload = {
                 "pi_temp": get_temp(),
-                "throttle_status": get_throttle(),
+                "pi_throttle": get_throttle(),
             }
 
         with state_lock:
