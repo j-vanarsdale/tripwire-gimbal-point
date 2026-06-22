@@ -58,6 +58,14 @@ def get_temp():
         return float(temp_raw.split('=')[1].split("'")[0])
     except Exception:
         return None
+    
+def get_throttle():
+    try:
+        throttle = subprocess.check_output(["vcgencmd", "get_throttled"]).decode()
+        return str(throttle)
+    except Exception:
+        return None
+
 
 
 if __name__ == "__main__":
@@ -89,6 +97,7 @@ if __name__ == "__main__":
 
         payload = {
                 "pi_temp": get_temp(),
+                "throttle_status": get_throttle(),
             }
 
         with state_lock:
