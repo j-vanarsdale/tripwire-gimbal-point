@@ -430,7 +430,7 @@ def gimbal_loop(args, fallback):
     hdop = 0
     cube_time = 0
     temp = 0
-    telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
+    telem_fields = ['GLOBAL_POSITION_INT']
     dr_tracked_icao = None
     track  = None
     pos    = None
@@ -480,9 +480,10 @@ def gimbal_loop(args, fallback):
             last_raw  = fallback
         heading = msg.hdg / 100.0
 
-        roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(
-            gmsg.q[0], gmsg.q[1], gmsg.q[2], gmsg.q[3]
-        )
+        if gmsg:
+            roll_meas, pitch_meas, yaw_meas = quaternion_to_euler(
+                gmsg.q[0], gmsg.q[1], gmsg.q[2], gmsg.q[3]
+            )
 
         if pmsg:
             hdop = pmsg.eph
