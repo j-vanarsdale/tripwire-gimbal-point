@@ -80,10 +80,12 @@ if __name__ == "__main__":
     flask_thread.start()
     print(f"REST API listening on port {args.api_port}")
 
+    # ---- Telemetry JSONL file state ----
+    telemetry_file = None
+    last_rotation_time = time.time()
+
     while True:
-        # ---- Telemetry JSONL file state ----
-        telemetry_file = None
-        last_rotation_time = time.time()
+        
 
         payload = {
                 "pi_temp": get_temp(),
