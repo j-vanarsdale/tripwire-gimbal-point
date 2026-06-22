@@ -62,7 +62,7 @@ def get_temp():
 def get_throttle():
     try:
         throttle = subprocess.check_output(["vcgencmd", "get_throttled"]).decode()
-        return str(throttle)
+        return str(throttle)[10:]
     except Exception:
         return None
 
