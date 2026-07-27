@@ -1,0 +1,54 @@
+{
+  "name": "tripwire-gimbal-point",
+  "version": "1.0.0",
+  "description": "Gimbal pointing REST API (target / RC / ADS-B tracking) with an integrated MAVProxy telemetry bridge.",
+  "author": "Y2Kmeltdown",
+  "dependencies": {
+    "apt": [
+      "python3-dev",
+      "python3-opencv",
+      "python3-matplotlib",
+      "python3-lxml",
+      "python3-pygame"
+    ],
+    "pip": [
+      "flask",
+      "pymavlink",
+      "future",
+      "PyYAML",
+      "mavproxy"
+    ],
+    "system_site_packages": true
+  },
+  "arguments": [
+    { "name": "api_port",     "flag": "--api_port",     "type": "int",   "default": 5001 },
+    { "name": "port",         "flag": "--port",         "type": "str",   "default": "udp:127.0.0.1:14550" },
+    { "name": "baud",         "flag": "--baud",         "type": "int",   "default": 115200 },
+    { "name": "yaw_offset",   "flag": "--yaw_offset",   "type": "float", "default": 0.0 },
+    { "name": "pitch_offset", "flag": "--pitch_offset", "type": "float", "default": 0.0 },
+    { "name": "period",       "flag": "--period",       "type": "float", "default": 2 },
+    { "name": "smooth",       "flag": "--smooth",       "type": "float", "default": 0.1 },
+    { "name": "adsb_host",    "flag": "--adsb_host",    "type": "str",   "default": "192.168.40.106" },
+    { "name": "adsb_port",    "flag": "--adsb_port",    "type": "int",   "default": 30003 },
+    { "name": "master",       "flag": "--master",       "type": "str",   "default": "/dev/ttyAMA0,115200" },
+    { "name": "out_gcs",      "flag": "--out",          "type": "str",   "default": "udp:192.168.30.8:14550" },
+    { "name": "out_local",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14551" }
+  ],
+  "sockets": [
+    { "name": "api", "type": "tcp", "port": 5001 }
+  ],
+  "programs": [
+    {
+      "name": "gimbal-point-api",
+      "command": "{venv_python} {module_dir}/GIMBAL_POINT_API.py --port {arg:port} --baud {arg:baud} --api_port {arg:api_port} --yaw_offset {arg:yaw_offset} --pitch_offset {arg:pitch_offset} --period {arg:period} --smooth {arg:smooth} --adsb_host {arg:adsb_host} --adsb_port {arg:adsb_port}",
+      "directory": "{module_dir}",
+      "priority": 20
+    },
+    {
+      "name": "mavproxy",
+      "command": "/bin/bash {module_dir}/mavproxy.sh {venv_dir} --master={arg:master} --out {arg:out_gcs} --out {arg:out_local} --non-interactive",
+      "directory": "{module_dir}",
+      "priority": 10
+    }
+  ]
+}
