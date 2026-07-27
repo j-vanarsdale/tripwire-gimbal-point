@@ -16,7 +16,8 @@
       "pymavlink",
       "future",
       "PyYAML",
-      "mavproxy"
+      "mavproxy",
+      "telnetlib3"
     ],
     "system_site_packages": true
   },
