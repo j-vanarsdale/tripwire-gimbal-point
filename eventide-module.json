@@ -21,8 +21,8 @@
     ],
     "system_site_packages": true
   },
+  "recordings_subdir": "telemetry",
   "arguments": [
-    { "name": "api_port",     "flag": "--api_port",     "type": "int",   "default": 5001 },
     { "name": "port",         "flag": "--port",         "type": "str",   "default": "udp:127.0.0.1:14550" },
     { "name": "baud",         "flag": "--baud",         "type": "int",   "default": 115200 },
     { "name": "yaw_offset",   "flag": "--yaw_offset",   "type": "float", "default": 0.0 },
@@ -41,7 +41,7 @@
   "programs": [
     {
       "name": "gimbal-point-api",
-      "command": "{venv_python} {module_dir}/GIMBAL_POINT_API.py --port {arg:port} --baud {arg:baud} --api_port {arg:api_port} --yaw_offset {arg:yaw_offset} --pitch_offset {arg:pitch_offset} --period {arg:period} --smooth {arg:smooth} --adsb_host {arg:adsb_host} --adsb_port {arg:adsb_port}",
+      "command": "{venv_python} {module_dir}/GIMBAL_POINT_API.py --port {arg:port} --baud {arg:baud} --api_port {socket:api} --yaw_offset {arg:yaw_offset} --pitch_offset {arg:pitch_offset} --period {arg:period} --smooth {arg:smooth} --adsb_host {arg:adsb_host} --adsb_port {arg:adsb_port} --telemetry_dir {recordings_subdir}",
       "directory": "{module_dir}",
       "priority": 20
     },
