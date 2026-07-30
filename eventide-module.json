@@ -38,6 +38,111 @@
   "sockets": [
     { "name": "api", "type": "tcp", "port": 5001 }
   ],
+  "ui": [
+    {
+      "id": "map",
+      "type": "map",
+      "title": "MAP",
+      "region": "center",
+      "default": true,
+      "track": {"socket": "api", "get": "/telemetry", "interval": 1000, "lat": "lat", "lon": "lon", "heading": "heading", "gimbal": "pan_out", "frame": "frame_flag"},
+      "adsb": {"socket": "api", "get": "/adsb/tracks", "interval": 5000, "lat": "lat", "lon": "lon", "label": "callsign", "key": "icao"}
+    },
+    {
+      "id": "target",
+      "type": "form",
+      "title": "GIMBAL TARGET",
+      "region": "sidebar",
+      "default": true,
+      "socket": "api",
+      "get": "/target",
+      "put": "/target",
+      "submit_label": "⊕ POINT GIMBAL",
+      "fields": [
+        {"key": "lat", "label": "Latitude", "kind": "number", "step": "0.000001"},
+        {"key": "lon", "label": "Longitude", "kind": "number", "step": "0.000001"},
+        {"key": "alt", "label": "Altitude (m)", "kind": "number", "step": "0.1"}
+      ]
+    },
+    {
+      "id": "rc",
+      "type": "joystick",
+      "title": "RC CONTROL",
+      "region": "sidebar",
+      "default": true,
+      "socket": "api",
+      "put": "/rc",
+      "telemetry_get": "/telemetry",
+      "paths": {"x": "pan_out", "y": "tilt_out"},
+      "fields": {"x": "pan", "y": "tilt", "frame": "frame"}
+    },
+    {
+      "id": "adsb",
+      "type": "table",
+      "title": "ADS-B TARGETS",
+      "region": "sidebar",
+      "default": true,
+      "socket": "api",
+      "get": "/adsb/tracks",
+      "interval": 5000,
+      "columns": [
+        {"label": "CS", "path": "callsign"},
+        {"label": "DIST", "path": "distance_m", "fmt": "m_km"},
+        {"label": "ALT", "path": "alt_ft", "fmt": "int"},
+        {"label": "SPD", "path": "speed", "fmt": "int"}
+      ],
+      "row_action": {"label": "TRACK", "method": "PUT", "path": "/adsb/track", "key": "icao"},
+      "stop_action": {"label": "■ TRACKING", "method": "DELETE", "path": "/adsb/track"}
+    },
+    {
+      "id": "adsb-settings",
+      "type": "form",
+      "title": "ADS-B SETTINGS",
+      "region": "sidebar",
+      "default": false,
+      "socket": "api",
+      "fields": [
+        {"key": "lead_time_s", "label": "Lead time (s)", "kind": "number", "step": "0.1", "min": 0, "max": 20, "get": "/adsb/lead_time", "put": "/adsb/lead_time"},
+        {"key": "alt_offset_m", "label": "Alt offset (m)", "kind": "number", "step": "1", "get": "/adsb/alt_offset", "put": "/adsb/alt_offset"}
+      ]
+    },
+    {
+      "id": "platform",
+      "type": "telemetry",
+      "title": "PLATFORM",
+      "region": "sidebar",
+      "default": true,
+      "socket": "api",
+      "get": "/telemetry",
+      "interval": 2000,
+      "rows": [
+        {"label": "LAT", "path": "lat", "fmt": "f6"},
+        {"label": "LON", "path": "lon", "fmt": "f6"},
+        {"label": "ALT", "path": "alt", "fmt": "f1"},
+        {"label": "HDG", "path": "heading", "fmt": "f1"},
+        {"label": "PI TEMP", "path": "pi_temp", "fmt": "f1"},
+        {"label": "CUBE TEMP", "path": "cube_temp", "fmt": "f1"}
+      ]
+    },
+    {
+      "id": "gimbal-out",
+      "type": "telemetry",
+      "title": "GIMBAL OUTPUT",
+      "region": "sidebar",
+      "default": true,
+      "socket": "api",
+      "get": "/telemetry",
+      "interval": 2000,
+      "rows": [
+        {"label": "PAN OUT", "path": "pan_out", "fmt": "f2"},
+        {"label": "TILT OUT", "path": "tilt_out", "fmt": "f2"},
+        {"label": "MODE", "path": "mode"},
+        {"label": "ROLL", "path": "roll_meas", "fmt": "f2"},
+        {"label": "PITCH", "path": "pitch_meas", "fmt": "f2"},
+        {"label": "YAW", "path": "yaw_meas", "fmt": "f2"}
+      ]
+    }
+  ],
   "programs": [
     {
       "name": "gimbal-point-api",
