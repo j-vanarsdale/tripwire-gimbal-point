@@ -23,7 +23,7 @@
   },
   "recordings_subdir": "telemetry",
   "arguments": [
-    { "name": "port",         "flag": "--port",         "type": "str",   "default": "udp:127.0.0.1:14550" },
+    { "name": "port",         "flag": "--port",         "type": "str",   "default": "udp:127.0.0.1:14551" },
     { "name": "baud",         "flag": "--baud",         "type": "int",   "default": 115200 },
     { "name": "yaw_offset",   "flag": "--yaw_offset",   "type": "float", "default": 0.0 },
     { "name": "pitch_offset", "flag": "--pitch_offset", "type": "float", "default": 0.0 },
