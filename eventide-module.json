@@ -148,6 +148,7 @@
       "mod": "gimbal", 
       "socket": "api", 
       "get": "/telemetry",
+      "default": false,
       "paths": { 
         "pan": "yaw_meas", 
         "tilt": "pitch_meas", 
