@@ -142,6 +142,19 @@
         {"label": "YAW", "path": "yaw_meas", "fmt": "f2"}
       ]
     }
+    { 
+      "type": "orientation3d", 
+      "region": "center", 
+      "mod": "gimbal", 
+      "socket": "api", 
+      "get": "/telemetry",
+      "paths": { 
+        "pan": "yaw_meas", 
+        "tilt": "pitch_meas", 
+        "roll": "roll_meas" 
+      }, 
+      "interval": 500 
+    }
   ],
   "programs": [
     {
