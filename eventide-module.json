@@ -46,7 +46,7 @@
       "region": "center",
       "default": true,
       "track": {"socket": "api", "get": "/telemetry", "interval": 1000, "lat": "lat", "lon": "lon", "heading": "heading", "gimbal": "pan_out", "frame": "frame_flag"},
-      "adsb": {"socket": "api", "get": "/adsb/tracks", "interval": 5000, "lat": "lat", "lon": "lon", "label": "callsign", "key": "icao"}
+      "adsb": {"socket": "api", "get": "/adsb/tracks", "interval": 2000, "lat": "lat", "lon": "lon", "label": "callsign", "key": "icao"}
     },
     {
       "id": "target",
@@ -84,7 +84,7 @@
       "default": true,
       "socket": "api",
       "get": "/adsb/tracks",
-      "interval": 5000,
+      "interval": 2000,
       "columns": [
         {"label": "CS", "path": "callsign"},
         {"label": "DIST", "path": "distance_m", "fmt": "m_km"},
