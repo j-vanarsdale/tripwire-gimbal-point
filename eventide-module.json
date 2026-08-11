@@ -141,7 +141,7 @@
         {"label": "PITCH", "path": "pitch_meas", "fmt": "f2"},
         {"label": "YAW", "path": "yaw_meas", "fmt": "f2"}
       ]
-    }
+    },
     { 
       "id": "orientation3d",
       "type": "orientation3d", 
