@@ -151,7 +151,7 @@
       "id": "platform",
       "type": "telemetry",
       "title": "PLATFORM",
-      "region": "sidebar",
+      "region": "center",
       "default": true,
       "socket": "telemetry",
       "get": "/telemetry",
@@ -167,7 +167,7 @@
     },
     {
       "id": "gimbal-out",
-      "type": "telemetry",
+      "type": "center",
       "title": "GIMBAL OUTPUT",
       "region": "sidebar",
       "default": true,
