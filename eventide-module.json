@@ -102,7 +102,8 @@
       "socket": "api",
       "fields": [
         {"key": "lead_time_s", "label": "Lead time (s)", "kind": "nudge", "step": "0.1", "min": 0, "max": 20, "get": "/adsb/lead_time", "put": "/adsb/lead_time"},
-        {"key": "alt_offset_m", "label": "Alt offset (m)", "kind": "nudge", "step": "1", "get": "/adsb/alt_offset", "put": "/adsb/alt_offset"}
+        {"key": "alt_offset_m", "label": "Alt offset (m)", "kind": "nudge", "step": "10", "get": "/adsb/alt_offset", "put": "/adsb/alt_offset"},
+        {"key": "yaw_offset_deg", "label": "Yaw offset (deg)", "kind": "nudge", "step": "1", "min": -180, "max": 180, "get": "/adsb/yaw_offset", "put": "/adsb/yaw_offset"}
       ]
     }, 
     {

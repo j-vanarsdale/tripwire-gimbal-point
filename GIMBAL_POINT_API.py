@@ -90,6 +90,7 @@ latest_payload = {}
 targeting_active = False
 desired_lead_time_s = 1.0
 desired_alt_offset_m = 0.0
+desired_yaw_offset_deg = 0.0
 adsb_target_icao = None   # set via API, None = not tracking
 tracks = None
 dr_tracker = None 
@@ -408,6 +409,30 @@ def get_alt_offset():
     with state_lock:
         value = desired_alt_offset_m
     return jsonify({"alt_offset_m": value}), 200
+
+@app.route("/adsb/yaw_offset", methods=["PUT"])
+def put_yaw_offset():
+    global desired_yaw_offset_deg
+    data = request.get_json(force=True, silent=True)
+    if not data or "yaw_offset_deg" not in data:
+        return jsonify({"error": "Missing field: yaw_offset_deg"}), 400
+
+    try:
+        value = float(data["yaw_offset_deg"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "yaw_offset_deg must be a number"}), 400
+
+    with state_lock:
+        desired_yaw_offset_deg = value
+
+    return jsonify({"status": "ok", "yaw_offset_deg": value}), 200
+
+
+@app.route("/adsb/yaw_offset", methods=["GET"])
+def get_yaw_offset():
+    with state_lock:
+        value = desired_yaw_offset_deg
+    return jsonify({"yaw_offset_deg": value}), 200
 # --------------------
 # GIMBAL LOOP
 # --------------------
@@ -539,10 +564,13 @@ def gimbal_loop(args, fallback):
                 tgt_lat = target["lat"]
                 tgt_lon = target["lon"]
                 tgt_alt = target["alt"]
+                # API yaw offset (compass correction) applies to ADS-B tracking
+                # only, same as lead_time and alt_offset.
+                yaw_off = desired_yaw_offset_deg if adsb_target_icao is not None else 0.0
 
                 pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
 
-                wrapped = (yaw_calc + args.yaw_offset + 180) % 360 - 180
+                wrapped = (yaw_calc + args.yaw_offset + yaw_off + 180) % 360 - 180
                 if abs(wrapped) > (180 - DEADZONE):
                     current_pan = pantilt["pan"]
                     if current_pan >= 0:
