@@ -72,6 +72,7 @@
       "default": true,
       "socket": "api",
       "put": "/rc",
+      "telemetry_get": "/telemetry",
       "paths": {"x": "pan_out", "y": "tilt_out"},
       "fields": {"x": "pan", "y": "tilt", "frame": "frame"}
     },
