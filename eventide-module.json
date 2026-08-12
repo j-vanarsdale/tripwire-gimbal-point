@@ -90,7 +90,7 @@
         {"label": "ALT", "path": "alt_ft", "fmt": "int"},
         {"label": "SPD", "path": "speed", "fmt": "int"}
       ],
-      "row_action": {"label": "TRACK", "method": "PUT", "path": "/adsb/track", "key": "icao"},
+      "row_action": {"label": "TRACK", "method": "PUT", "path": "/adsb/track", "key": "callsign"},
       "stop_action": {"label": "■ TRACKING", "method": "DELETE", "path": "/adsb/track"}
     },
     {
