@@ -27,7 +27,7 @@
     { "name": "baud",         "flag": "--baud",         "type": "int",   "default": 115200 },
     { "name": "yaw_offset",   "flag": "--yaw_offset",   "type": "float", "default": 0.0 },
     { "name": "pitch_offset", "flag": "--pitch_offset", "type": "float", "default": 0.0 },
-    { "name": "period",       "flag": "--period",       "type": "float", "default": 2 },
+    { "name": "period",       "flag": "--period",       "type": "float", "default": 0.1 },
     { "name": "smooth",       "flag": "--smooth",       "type": "float", "default": 0.1 },
     { "name": "adsb_host",    "flag": "--adsb_host",    "type": "str",   "default": "192.168.40.106" },
     { "name": "adsb_port",    "flag": "--adsb_port",    "type": "int",   "default": 30003 },
