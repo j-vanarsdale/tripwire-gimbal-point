@@ -1,7 +1,7 @@
 {
   "name": "tripwire-gimbal-point",
-  "version": "1.0.0",
-  "description": "Gimbal pointing REST API (target / RC / ADS-B tracking) with an integrated MAVProxy telemetry bridge.",
+  "version": "1.1.0",
+  "description": "Gimbal pointing REST API (target / RC / ADS-B tracking) and a separate MAVLink telemetry logging API, with an integrated MAVProxy telemetry bridge.",
   "author": "Y2Kmeltdown",
   "dependencies": {
     "apt": [
@@ -24,6 +24,7 @@
   "recordings_subdir": "telemetry",
   "arguments": [
     { "name": "port",         "flag": "--port",         "type": "str",   "default": "udp:127.0.0.1:14551" },
+    { "name": "telem_port",   "flag": "--port",         "type": "str",   "default": "udp:127.0.0.1:14552" },
     { "name": "baud",         "flag": "--baud",         "type": "int",   "default": 115200 },
     { "name": "yaw_offset",   "flag": "--yaw_offset",   "type": "float", "default": 0.0 },
     { "name": "pitch_offset", "flag": "--pitch_offset", "type": "float", "default": 0.0 },
@@ -33,10 +34,12 @@
     { "name": "adsb_port",    "flag": "--adsb_port",    "type": "int",   "default": 30003 },
     { "name": "master",       "flag": "--master",       "type": "str",   "default": "/dev/ttyAMA0,115200" },
     { "name": "out_gcs",      "flag": "--out",          "type": "str",   "default": "udp:192.168.30.8:14550" },
-    { "name": "out_local",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14551" }
+    { "name": "out_local",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14551" },
+    { "name": "out_telem",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14552" }
   ],
   "sockets": [
-    { "name": "api", "type": "tcp", "port": 5001 }
+    { "name": "api", "type": "tcp", "port": 5001 },
+    { "name": "telemetry", "type": "tcp" }
   ],
   "ui": [
     {
@@ -113,7 +116,7 @@
       "title": "PLATFORM",
       "region": "sidebar",
       "default": true,
-      "socket": "api",
+      "socket": "telemetry",
       "get": "/telemetry",
       "interval": 2000,
       "rows": [
@@ -162,13 +165,19 @@
   "programs": [
     {
       "name": "gimbal-point-api",
-      "command": "{venv_python} {module_dir}/GIMBAL_POINT_API.py --port {arg:port} --baud {arg:baud} --api_port {socket:api} --yaw_offset {arg:yaw_offset} --pitch_offset {arg:pitch_offset} --period {arg:period} --smooth {arg:smooth} --adsb_host {arg:adsb_host} --adsb_port {arg:adsb_port} --telemetry_dir {recordings_subdir}",
+      "command": "{venv_python} {module_dir}/GIMBAL_POINT_API.py --port {arg:port} --baud {arg:baud} --api_port {socket:api} --yaw_offset {arg:yaw_offset} --pitch_offset {arg:pitch_offset} --period {arg:period} --smooth {arg:smooth} --adsb_host {arg:adsb_host} --adsb_port {arg:adsb_port}",
       "directory": "{module_dir}",
       "priority": 20
     },
     {
+      "name": "telemetry-api",
+      "command": "{venv_python} {module_dir}/TELEMETRY_API.py --port {arg:telem_port} --baud {arg:baud} --api_port {socket:telemetry} --period {arg:period} --smooth {arg:smooth} --telemetry_dir {recordings_subdir}",
+      "directory": "{module_dir}",
+      "priority": 15
+    },
+    {
       "name": "mavproxy",
-      "command": "/bin/bash {module_dir}/mavproxy.sh {venv_dir} --master={arg:master} --out {arg:out_gcs} --out {arg:out_local} --non-interactive",
+      "command": "/bin/bash {module_dir}/mavproxy.sh {venv_dir} --master={arg:master} --out {arg:out_gcs} --out {arg:out_local} --out {arg:out_telem} --non-interactive",
       "directory": "{module_dir}",
       "priority": 10
     }
