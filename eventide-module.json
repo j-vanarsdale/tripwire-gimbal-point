@@ -101,10 +101,10 @@
       "default": false,
       "socket": "api",
       "fields": [
-        {"key": "lead_time_s", "label": "Lead time (s)", "kind": "number", "step": "0.1", "min": 0, "max": 20, "get": "/adsb/lead_time", "put": "/adsb/lead_time"},
-        {"key": "alt_offset_m", "label": "Alt offset (m)", "kind": "number", "step": "1", "get": "/adsb/alt_offset", "put": "/adsb/alt_offset"}
+        {"key": "lead_time_s", "label": "Lead time (s)", "kind": "nudge", "step": "0.1", "min": 0, "max": 20, "get": "/adsb/lead_time", "put": "/adsb/lead_time"},
+        {"key": "alt_offset_m", "label": "Alt offset (m)", "kind": "nudge", "step": "1", "get": "/adsb/alt_offset", "put": "/adsb/alt_offset"}
       ]
-    },
+    }, 
     {
       "id": "platform",
       "type": "telemetry",
