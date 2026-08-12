@@ -1,5 +1,5 @@
 ## API Script
-Has 3 modes: targetting, RC, adsb.
+Has 4 modes: targetting, RC, adsb, url track (polls a JSON URL for lat/lon/alt).
 
 Things to do:
 - Possibly: switch between kalman and dead reckoning? and manual? (frontend)

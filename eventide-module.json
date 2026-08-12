@@ -1,6 +1,6 @@
 {
   "name": "tripwire-gimbal-point",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Gimbal pointing REST API (target / RC / ADS-B tracking) and a separate MAVLink telemetry logging API, with an integrated MAVProxy telemetry bridge.",
   "author": "Y2Kmeltdown",
   "dependencies": {
@@ -109,7 +109,44 @@
         {"key": "alt_offset_m", "label": "Alt offset (m)", "kind": "nudge", "step": "10", "get": "/adsb/alt_offset", "put": "/adsb/alt_offset"},
         {"key": "yaw_offset_deg", "label": "Yaw offset (deg)", "kind": "nudge", "step": "1", "min": -180, "max": 180, "get": "/adsb/yaw_offset", "put": "/adsb/yaw_offset"}
       ]
-    }, 
+    },
+    {
+      "id": "url-track",
+      "type": "form",
+      "title": "URL TRACK",
+      "region": "sidebar",
+      "default": true,
+      "socket": "api",
+      "get": "/track/url",
+      "put": "/track/url",
+      "submit_label": "⌖ FOLLOW URL",
+      "fields": [
+        {"key": "url", "label": "URL", "kind": "text"},
+        {"key": "label", "label": "Label", "kind": "text"},
+        {"key": "interval", "label": "Poll (s)", "kind": "number", "step": "0.1", "min": 0.1},
+        {"key": "lat_key", "label": "Lat key", "kind": "text"},
+        {"key": "lon_key", "label": "Lon key", "kind": "text"},
+        {"key": "alt_key", "label": "Alt key", "kind": "text"}
+      ]
+    },
+    {
+      "id": "url-track-status",
+      "type": "telemetry",
+      "title": "URL TRACK STATUS",
+      "region": "sidebar",
+      "default": false,
+      "socket": "api",
+      "get": "/track/url",
+      "interval": 2000,
+      "rows": [
+        {"label": "ACTIVE", "path": "active"},
+        {"label": "LABEL", "path": "label"},
+        {"label": "AGE", "path": "age", "fmt": "f1"},
+        {"label": "LAT", "path": "lat", "fmt": "f6"},
+        {"label": "LON", "path": "lon", "fmt": "f6"},
+        {"label": "ALT", "path": "alt_m", "fmt": "f1"}
+      ]
+    },
     {
       "id": "platform",
       "type": "telemetry",

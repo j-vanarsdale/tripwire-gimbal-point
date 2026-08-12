@@ -2,7 +2,8 @@
 """
 Gimbal control REST API.
 
-Handles lat/lon/alt targeting, direct RC pan/tilt, and ADS-B tracking, and
+Handles lat/lon/alt targeting, direct RC pan/tilt, and track following —
+either an ADS-B lock or an arbitrary track polled from a JSON URL — and
 drives the gimbal over MAVLink. Telemetry logging and the full-fidelity
 telemetry API live in the separate TELEMETRY_API.py service; this service
 exposes only cutdown telemetry views with what gimbal control needs
@@ -11,7 +12,7 @@ exposes only cutdown telemetry views with what gimbal control needs
 import time, math, signal, sys, argparse, threading, os
 from pymavlink import mavutil
 from flask import Flask, request, jsonify
-from adsb import TrackList, DeadReckonTracker
+from adsb import TrackList, DeadReckonTracker, PolledTrack
 
 # --------------------
 # DEFAULT CONSTANTS
@@ -98,8 +99,9 @@ desired_lead_time_s = 1.0
 desired_alt_offset_m = 0.0
 desired_yaw_offset_deg = 0.0
 adsb_target_icao = None   # set via API, None = not tracking
+ext_track = None          # PolledTrack while URL tracking is active, None otherwise
 tracks = None
-dr_tracker = None 
+dr_tracker = None
 # --------------------
 
 
@@ -148,6 +150,14 @@ def connect_with_retry(port, baud):
             print("Connection failed. Retrying in 2 seconds...")
             time.sleep(2)
 
+def _stop_ext_track():
+    """Stop and clear the polled URL track, if any. Call with state_lock held."""
+    global ext_track
+    old = ext_track
+    ext_track = None
+    if old is not None:
+        old.stop()
+
 # --------------------
 # FLASK ROUTES
 # --------------------
@@ -187,6 +197,7 @@ def put_target():
                 except (TypeError, ValueError):
                     return jsonify({"error": f"Field '{key}' must be a number"}), 400
 
+        _stop_ext_track()
         targeting_active = True
         adsb_target_icao = None
         updated_target = dict(target)
@@ -251,6 +262,7 @@ def put_pantilt():
                 return jsonify({"error": "Field 'frame' must be a boolean"}), 400
             pantilt["frame"] = data["frame"]
 
+        _stop_ext_track()
         targeting_active = False
         adsb_target_icao = None
         updated = dict(pantilt)
@@ -319,7 +331,7 @@ def get_adsb_tracks():
     """
     if tracks is None:
         return jsonify({"error": "ADS-B not ready"}), 503
-    
+
     snapshot = tracks.get_all()
 
     with state_lock:
@@ -361,7 +373,7 @@ def get_adsb_tracks():
 def put_adsb_track():
     """
     Lock onto a specific aircraft by ICAO.
-    Switches mode to 'adsb', clears any existing targeting or rc mode.
+    Switches mode to 'adsb', clears any existing targeting, rc or URL track.
 
     Body: {"icao": "7C1234"}
     """
@@ -379,6 +391,7 @@ def put_adsb_track():
         return jsonify({"error": f"ICAO {icao} not currently visible"}), 404
 
     with state_lock:
+        _stop_ext_track()
         adsb_target_icao = icao
         targeting_active = False
 
@@ -466,6 +479,113 @@ def get_yaw_offset():
     with state_lock:
         value = desired_yaw_offset_deg
     return jsonify({"yaw_offset_deg": value}), 200
+
+@app.route("/track/url", methods=["PUT"])
+def put_url_track():
+    """
+    Follow an arbitrary track by polling a JSON URL for position updates.
+    Switches mode to 'track', clearing any ADS-B lock, targeting or rc mode.
+    The same dead-reckoning smoothing and lead/alt/yaw offsets used for
+    ADS-B tracking are applied to the polled track.
+
+    Expected JSON body:
+        {
+            "url":      <string>,          # required, http(s) endpoint
+            "interval": <float>,           # poll period in seconds (default 1.0)
+            "label":    <string>,          # display name (default: the URL)
+            "lat_key":  <string>,          # dot-paths into the JSON object,
+            "lon_key":  <string>,          # e.g. "position.lat"
+            "alt_key":  <string>,          # (defaults "lat" / "lon" / "alt")
+            "speed_key":  <string>,        # optional field overrides; when
+            "track_key":  <string>,        # omitted a few common key names
+            "vrate_key":  <string>         # are probed automatically
+        }
+
+    The JSON must provide lat/lon (degrees) and altitude (metres). Speed
+    (m/s), track/heading (deg) and vertical rate (m/s) are optional and
+    improve the dead-reckoning when present.
+    """
+    global ext_track, adsb_target_icao, targeting_active
+    data = request.get_json(force=True, silent=True)
+    if not data or "url" not in data:
+        return jsonify({"error": "Missing field: url"}), 400
+
+    allowed = {"url", "interval", "label",
+               "lat_key", "lon_key", "alt_key",
+               "speed_key", "track_key", "vrate_key"}
+    unknown = set(data.keys()) - allowed
+    if unknown:
+        return jsonify({"error": f"Unknown fields: {unknown}"}), 400
+
+    url = str(data["url"]).strip()
+    if not url.startswith(("http://", "https://")):
+        return jsonify({"error": "url must start with http:// or https://"}), 400
+
+    raw_interval = data.get("interval", 1.0)
+    if raw_interval is None or raw_interval == "":
+        raw_interval = 1.0
+    try:
+        interval = float(raw_interval)
+        if interval <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "interval must be a positive number"}), 400
+
+    # Blank strings (e.g. untouched form fields) count as "not provided"
+    kwargs = {}
+    for key in ("lat_key", "lon_key", "alt_key", "speed_key", "track_key", "vrate_key"):
+        if key in data:
+            if not isinstance(data[key], str):
+                return jsonify({"error": f"Field '{key}' must be a string"}), 400
+            if data[key].strip():
+                kwargs[key] = data[key].strip()
+
+    label = data.get("label")
+    if label is not None:
+        if not isinstance(label, str):
+            return jsonify({"error": "Field 'label' must be a string"}), 400
+        label = label.strip() or None
+
+    with state_lock:
+        _stop_ext_track()
+        adsb_target_icao = None
+        targeting_active = False
+        ext_track = PolledTrack(url, interval=interval, label=label, **kwargs)
+        ext_track.start()
+
+    return jsonify({"status": "ok", "mode": "track",
+                    "url": url, "interval": interval}), 200
+
+
+@app.route("/track/url", methods=["GET"])
+def get_url_track():
+    """Return the status of the polled URL track (active: false when idle)."""
+    with state_lock:
+        t = ext_track
+
+    if t is None:
+        return jsonify({"active": False, "url": None}), 200
+
+    return jsonify({
+        "active":   True,
+        "url":      t.url,
+        "label":    t.callsign,
+        "interval": t.interval,
+        "age":      round(t.age(), 1),
+        "lat":      t.lat,
+        "lon":      t.lon,
+        "alt_m":    round(t.altitude * 0.3048, 1) if t.altitude is not None else None,
+    }), 200
+
+
+@app.route("/track/url", methods=["DELETE"])
+def delete_url_track():
+    """Stop URL tracking and return to rc mode."""
+    global targeting_active
+    with state_lock:
+        _stop_ext_track()
+        targeting_active = False
+    return jsonify({"status": "ok", "mode": "rc"}), 200
 # --------------------
 # GIMBAL LOOP
 # --------------------
@@ -482,7 +602,7 @@ def gimbal_loop(args, fallback):
     roll_meas  = pitch_meas = yaw_meas = 0.0
     live = 0
     telem_fields = ['GLOBAL_POSITION_INT', 'GIMBAL_DEVICE_ATTITUDE_STATUS']
-    dr_tracked_icao = None
+    dr_tracked = None
     track  = None
     pos    = None
     dr_lat = dr_lon = dr_alt = None
@@ -495,6 +615,8 @@ def gimbal_loop(args, fallback):
             pass
         if tracks is not None:
             tracks.stop()
+        if ext_track is not None:
+            ext_track.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT,  cleanup)
@@ -544,31 +666,36 @@ def gimbal_loop(args, fallback):
 
         lat, lon, alt = smooth_pos
 
-        # ---- ADS-B tracking mode ----
-        if tracks is not None:
-            with state_lock:
-                icao_to_track = adsb_target_icao
+        # ---- Track following (ADS-B lock or polled URL track) ----
+        with state_lock:
+            icao_to_track = adsb_target_icao
+            polled_track  = ext_track
 
-            if icao_to_track is not None:
-                track = tracks.get(icao_to_track)
+        track = None
+        if icao_to_track is not None and tracks is not None:
+            track = tracks.get(icao_to_track)
+        elif polled_track is not None:
+            track = polled_track
 
-                if track is not None and track.has_position() and track.altitude is not None:
+        if track is not None and track.has_position() and track.altitude is not None:
 
-                    # Reset tracker if locked ICAO changed
-                    if track.icao != dr_tracked_icao:
-                        dr_tracker      = DeadReckonTracker(track, lead_s=desired_lead_time_s)
-                        dr_tracked_icao = track.icao
-                        print(f"[ADS-B] Tracking {track.icao} ({track.callsign})")
+            # Reset tracker if the followed track changed
+            if track is not dr_tracked:
+                dr_tracker = DeadReckonTracker(track, lead_s=desired_lead_time_s)
+                dr_tracked = track
+                print(f"[Track] Following {track.icao or track.callsign}")
 
-                    dr_tracker.step()
-                    pos = dr_tracker.get()
-                    if pos:
-                        dr_lat, dr_lon, dr_alt = pos
-                        with state_lock:
-                            target["lat"] = dr_lat
-                            target["lon"] = dr_lon
-                            target["alt"] = (dr_alt * 0.3048) + desired_alt_offset_m  
-                            targeting_active = True
+            dr_tracker.step()
+            pos = dr_tracker.get()
+            if pos:
+                dr_lat, dr_lon, dr_alt = pos
+                with state_lock:
+                    target["lat"] = dr_lat
+                    target["lon"] = dr_lon
+                    target["alt"] = (dr_alt * 0.3048) + desired_alt_offset_m
+                    targeting_active = True
+        elif track is None:
+            pos = None
 
         # ---- Targeting mode: recompute pan/tilt from lat/lon every tick ----
         # This runs inside the loop so angles stay correct as the vehicle moves.
@@ -578,9 +705,10 @@ def gimbal_loop(args, fallback):
                 tgt_lat = target["lat"]
                 tgt_lon = target["lon"]
                 tgt_alt = target["alt"]
-                # API yaw offset (compass correction) applies to ADS-B tracking
-                # only, same as lead_time and alt_offset.
-                yaw_off = desired_yaw_offset_deg if adsb_target_icao is not None else 0.0
+                # API yaw offset (compass correction) applies to track
+                # following only, same as lead_time and alt_offset.
+                following = adsb_target_icao is not None or ext_track is not None
+                yaw_off = desired_yaw_offset_deg if following else 0.0
 
                 pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
 
@@ -598,9 +726,11 @@ def gimbal_loop(args, fallback):
             pan_out           = pantilt["pan"]
             tilt_out          = pantilt["tilt"]
             use_vehicle_frame = pantilt["frame"]
-            # Mode string — adsb takes priority over generic targeting
+            # Mode string — a followed track takes priority over generic targeting
             if adsb_target_icao is not None:
                 mode = "adsb"
+            elif ext_track is not None:
+                mode = "track"
             elif targeting_active:
                 mode = "targeting"
             else:
@@ -628,7 +758,7 @@ def gimbal_loop(args, fallback):
             "roll_meas":  roll_meas,
             "pitch_meas": pitch_meas,
             "yaw_meas":   yaw_meas,
-            # ---- ADS-B tracking state (None when not tracking) ----
+            # ---- Followed-track state (None when not tracking) ----
             "adsb_icao":     track.icao     if track else None,
             "adsb_callsign": track.callsign if track else None,
             "adsb_dr_lat":   dr_lat         if pos else None,

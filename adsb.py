@@ -1,6 +1,7 @@
 import time, os
 import asyncio
 import telnetlib3
+import urllib.request
 from threading import Thread, Lock
 import numpy as np
 import json
@@ -415,6 +416,176 @@ class TrackList(Thread):
             f" tracks={len(self)}"
             f" prune_after={self.prune_after}s)"
         )
+
+class PolledTrack(Thread):
+    """
+    Generic track source that polls an HTTP JSON endpoint for positions.
+
+    Duck-typed to match Track so DeadReckonTracker / KalmanTracker and the
+    gimbal loop can follow it exactly like an ADS-B track.
+
+    The endpoint must return a JSON object (or a list whose first element is
+    one) containing at least latitude, longitude and altitude. Lookup keys
+    are dot-paths into that object (e.g. "position.lat") and are
+    configurable; speed, track and vertical rate are probed from a few
+    common key names when no explicit key is given. Units at the HTTP
+    boundary are SI — degrees, metres, metres/second — converted internally
+    to the aviation units (feet, knots, feet/minute) the trackers expect.
+
+    Usage
+    -----
+        track = PolledTrack("http://192.168.1.10:8000/position", interval=0.5)
+        track.start()
+        ...
+        track.stop()
+    """
+
+    _M_PER_FT   = 0.3048
+    _MPS_PER_KT = 0.514444
+
+    # Aliases probed for the optional fields when no explicit key is given.
+    _SPEED_ALIASES = ("speed", "groundspeed", "ground_speed", "gs")
+    _TRACK_ALIASES = ("track", "heading", "hdg", "course")
+    _VRATE_ALIASES = ("vertical_rate", "vrate", "climb", "climb_rate")
+
+    def __init__(self, url: str, interval: float = 1.0,
+                 lat_key: str = "lat", lon_key: str = "lon", alt_key: str = "alt",
+                 speed_key: str = None, track_key: str = None, vrate_key: str = None,
+                 timeout: float = 5.0, label: str = None):
+        """
+        Parameters
+        ----------
+        url      : HTTP(S) endpoint returning a JSON position object
+        interval : Poll period in seconds
+        lat_key / lon_key / alt_key : dot-paths to the required fields
+        speed_key / track_key / vrate_key : dot-paths to optional fields
+                   (None = probe common aliases)
+        timeout  : Per-request timeout in seconds
+        label    : Display name (exposed as .callsign); defaults to the URL
+        """
+        super().__init__(daemon=True)
+        self.url      = url
+        self.interval = interval
+        self.callsign = label or url
+        self.icao     = None          # present for Track compatibility
+
+        self._lat_key   = lat_key
+        self._lon_key   = lon_key
+        self._alt_key   = alt_key
+        self._speed_key = speed_key
+        self._track_key = track_key
+        self._vrate_key = vrate_key
+        self._timeout   = timeout
+        self._stop_event = False
+
+        # Track-compatible state, in the same aviation units as adsb Track
+        self.lat           = None
+        self.lon           = None
+        self.altitude      = None     # ft
+        self.speed         = None     # kts
+        self.track         = None     # deg
+        self.vertical_rate = None     # ft/min
+        self.first_seen    = time.time()
+        self.last_seen     = self.first_seen
+        self.last_pos_seen = None
+
+    # ------------------------------------------------------------------
+    # Thread entry point
+    # ------------------------------------------------------------------
+
+    def run(self):
+        while not self._stop_event:
+            try:
+                with urllib.request.urlopen(self.url, timeout=self._timeout) as resp:
+                    data = json.loads(resp.read().decode("utf-8", errors="replace"))
+                self._ingest(data)
+            except Exception as e:
+                print(f"[PolledTrack] Poll of {self.url} failed: {e}")
+            time.sleep(self.interval)
+
+    # ------------------------------------------------------------------
+    # Internal ingest (called from within the thread)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _dig(data, path):
+        """Follow a dot-path into nested dicts; None if anything is missing."""
+        for part in path.split("."):
+            if not isinstance(data, dict):
+                return None
+            data = data.get(part)
+        return data
+
+    def _probe(self, data, explicit, aliases):
+        """Look up an optional field by explicit key, else probe aliases."""
+        keys = [explicit] if explicit else aliases
+        for key in keys:
+            value = self._dig(data, key)
+            if value is not None:
+                return value
+        return None
+
+    @staticmethod
+    def _float_or_none(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _ingest(self, data):
+        if isinstance(data, list):
+            data = data[0] if data else None
+        if not isinstance(data, dict):
+            return
+
+        now = time.time()
+        self.last_seen = now
+
+        lat = self._float_or_none(self._dig(data, self._lat_key))
+        lon = self._float_or_none(self._dig(data, self._lon_key))
+        alt = self._float_or_none(self._dig(data, self._alt_key))
+        if lat is None or lon is None or alt is None:
+            return
+
+        self.lat      = lat
+        self.lon      = lon
+        self.altitude = alt / self._M_PER_FT                    # m → ft
+
+        speed = self._float_or_none(self._probe(data, self._speed_key, self._SPEED_ALIASES))
+        track = self._float_or_none(self._probe(data, self._track_key, self._TRACK_ALIASES))
+        vrate = self._float_or_none(self._probe(data, self._vrate_key, self._VRATE_ALIASES))
+        if speed is not None:
+            self.speed = speed / self._MPS_PER_KT               # m/s → kts
+        if track is not None:
+            self.track = track % 360.0
+        if vrate is not None:
+            self.vertical_rate = vrate * 60.0 / self._M_PER_FT  # m/s → ft/min
+
+        self.last_pos_seen = now
+
+    # ------------------------------------------------------------------
+    # Public read interface (safe to call from any external thread)
+    # ------------------------------------------------------------------
+
+    def age(self) -> float:
+        """Seconds since last successful poll (position or not)."""
+        return time.time() - self.last_seen
+
+    def has_position(self) -> bool:
+        return self.lat is not None and self.lon is not None
+
+    def stop(self):
+        """Signal the poll loop to exit on its next iteration."""
+        self._stop_event = True
+
+    def __repr__(self) -> str:
+        return (
+            f"PolledTrack({self.url}"
+            f" lat={self.lat}"
+            f" lon={self.lon}"
+            f" age={self.age():.1f}s)"
+        )
+
 
 class DeadReckonTracker:
     def __init__(self, track: Track, lead_s: float = LEAD_TIME_S,
