@@ -190,6 +190,7 @@
       "region": "center", 
       "socket": "api", 
       "get": "/telemetry",
+      "model": "STP-ImagePlaneMount-ASM-A 2.STL",
       "default": false,
       "paths": { 
         "pan": "yaw_meas", 
