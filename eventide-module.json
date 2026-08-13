@@ -190,7 +190,7 @@
       "region": "center", 
       "socket": "api", 
       "get": "/telemetry",
-      "model": "Camera.stl",
+      "model": "GUI_MODEL.STL",
       "default": false,
       "paths": { 
         "pan": "yaw_meas", 
