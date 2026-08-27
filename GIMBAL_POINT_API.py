@@ -98,6 +98,8 @@ targeting_active = False
 desired_lead_time_s = 1.0
 desired_alt_offset_m = 0.0
 desired_yaw_offset_deg = 0.0
+desired_target_pitch_offset_deg = 0.0   # targeting-only pitch nudge
+desired_target_yaw_offset_deg = 0.0     # targeting-only yaw nudge
 adsb_target_icao = None   # set via API, None = not tracking
 ext_track = None          # PolledTrack while URL tracking is active, None otherwise
 tracks = None
@@ -215,6 +217,60 @@ def get_target():
     with state_lock:
         current = dict(target)
     return jsonify(current), 200
+
+
+@app.route("/target/pitch_offset", methods=["PUT"])
+def put_target_pitch_offset():
+    """Set the targeting-only pitch nudge (degrees)."""
+    global desired_target_pitch_offset_deg
+    data = request.get_json(force=True, silent=True)
+    if not data or "pitch_offset_deg" not in data:
+        return jsonify({"error": "Missing field: pitch_offset_deg"}), 400
+
+    try:
+        value = float(data["pitch_offset_deg"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "pitch_offset_deg must be a number"}), 400
+
+    with state_lock:
+        desired_target_pitch_offset_deg = value
+
+    return jsonify({"status": "ok", "pitch_offset_deg": value}), 200
+
+
+@app.route("/target/pitch_offset", methods=["GET"])
+def get_target_pitch_offset():
+    """Return the targeting-only pitch nudge (degrees)."""
+    with state_lock:
+        value = desired_target_pitch_offset_deg
+    return jsonify({"pitch_offset_deg": value}), 200
+
+
+@app.route("/target/yaw_offset", methods=["PUT"])
+def put_target_yaw_offset():
+    """Set the targeting-only yaw nudge (degrees)."""
+    global desired_target_yaw_offset_deg
+    data = request.get_json(force=True, silent=True)
+    if not data or "yaw_offset_deg" not in data:
+        return jsonify({"error": "Missing field: yaw_offset_deg"}), 400
+
+    try:
+        value = float(data["yaw_offset_deg"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "yaw_offset_deg must be a number"}), 400
+
+    with state_lock:
+        desired_target_yaw_offset_deg = value
+
+    return jsonify({"status": "ok", "yaw_offset_deg": value}), 200
+
+
+@app.route("/target/yaw_offset", methods=["GET"])
+def get_target_yaw_offset():
+    """Return the targeting-only yaw nudge (degrees)."""
+    with state_lock:
+        value = desired_target_yaw_offset_deg
+    return jsonify({"yaw_offset_deg": value}), 200
 
 
 @app.route("/rc", methods=["PUT"])
@@ -707,12 +763,16 @@ def gimbal_loop(args, fallback):
                 tgt_alt = target["alt"]
                 # API yaw offset (compass correction) applies to track
                 # following only, same as lead_time and alt_offset.
+                # Targeting-only pitch/yaw nudges apply only to plain lat/lon
+                # targeting mode, not to ADS-B or URL track following.
                 following = adsb_target_icao is not None or ext_track is not None
                 yaw_off = desired_yaw_offset_deg if following else 0.0
+                target_pitch_nudge = desired_target_pitch_offset_deg if not following else 0.0
+                target_yaw_nudge = desired_target_yaw_offset_deg if not following else 0.0
 
                 pitch_calc, yaw_calc = compute_angles(lat, lon, alt, tgt_lat, tgt_lon, tgt_alt)
 
-                wrapped = (yaw_calc + args.yaw_offset + yaw_off + 180) % 360 - 180
+                wrapped = (yaw_calc + args.yaw_offset + yaw_off + target_yaw_nudge + 180) % 360 - 180
                 if abs(wrapped) > (180 - DEADZONE):
                     current_pan = pantilt["pan"]
                     if current_pan >= 0:
@@ -720,7 +780,7 @@ def gimbal_loop(args, fallback):
                     else:
                         wrapped = -(180 - DEADZONE)
                 pantilt["pan"]   = wrapped
-                pantilt["tilt"]  = (pitch_calc + args.pitch_offset  + 180) % 360 - 180
+                pantilt["tilt"]  = (pitch_calc + args.pitch_offset + target_pitch_nudge + 180) % 360 - 180
                 pantilt["frame"] = False   # targeting is always earth frame
 
             pan_out           = pantilt["pan"]

@@ -68,6 +68,18 @@
       ]
     },
     {
+      "id": "target-nudge",
+      "type": "form",
+      "title": "TARGET NUDGE",
+      "region": "sidebar",
+      "default": false,
+      "socket": "api",
+      "fields": [
+        {"key": "yaw_offset_deg", "label": "Yaw nudge (deg)", "kind": "nudge", "step": "1", "min": -180, "max": 180, "get": "/target/yaw_offset", "put": "/target/yaw_offset"},
+        {"key": "pitch_offset_deg", "label": "Pitch nudge (deg)", "kind": "nudge", "step": "1", "min": -90, "max": 90, "get": "/target/pitch_offset", "put": "/target/pitch_offset"}
+      ]
+    },
+    {
       "id": "rc",
       "type": "joystick",
       "title": "RC CONTROL",
