@@ -11,6 +11,16 @@
 
 set -u
 VENV_DIR="$1"; shift
+DELAY="${1:-0}"; shift
+
+if [[ "$DELAY" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    if [ "$DELAY" != "0" ]; then
+        echo "mavproxy.sh: waiting ${DELAY}s before starting MAVProxy" >&2
+        sleep "$DELAY"
+    fi
+else
+    echo "mavproxy.sh: ignoring invalid startup delay '$DELAY'" >&2
+fi
 
 for cand in "$VENV_DIR/local/bin/mavproxy.py" "$VENV_DIR/bin/mavproxy.py"; do
     if [ -f "$cand" ]; then

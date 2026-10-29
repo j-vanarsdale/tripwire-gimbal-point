@@ -32,10 +32,11 @@
     { "name": "smooth",       "flag": "--smooth",       "type": "float", "default": 0.1 },
     { "name": "adsb_host",    "flag": "--adsb_host",    "type": "str",   "default": "192.168.40.106" },
     { "name": "adsb_port",    "flag": "--adsb_port",    "type": "int",   "default": 30003 },
-    { "name": "master",       "flag": "--master",       "type": "str",   "default": "/dev/ttyAMA0,115200" },
+    { "name": "master",       "flag": "--master",       "type": "str",   "default": "udpin:0.0.0:14550" },
     { "name": "out_gcs",      "flag": "--out",          "type": "str",   "default": "udp:192.168.30.8:14550" },
     { "name": "out_local",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14551" },
-    { "name": "out_telem",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14552" }
+    { "name": "out_telem",    "flag": "--out",          "type": "str",   "default": "udp:127.0.0.1:14552" },
+    { "name": "mavproxy_delay", "flag": "--mavproxy_delay", "type": "float", "default": 0.0 }
   ],
   "sockets": [
     { "name": "api", "type": "tcp", "port": 5001 },
@@ -227,7 +228,7 @@
     },
     {
       "name": "mavproxy",
-      "command": "/bin/bash {module_dir}/mavproxy.sh {venv_dir} --master={arg:master} --out {arg:out_gcs} --out {arg:out_local} --out {arg:out_telem} --non-interactive",
+      "command": "/bin/bash {module_dir}/mavproxy.sh {venv_dir} {arg:mavproxy_delay} --master={arg:master} --out {arg:out_gcs} --out {arg:out_local} --out {arg:out_telem} --non-interactive",
       "directory": "{module_dir}",
       "priority": 10
     }
